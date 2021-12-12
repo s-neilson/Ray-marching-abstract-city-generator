@@ -455,7 +455,7 @@ function preload()
 
 function setup() 
 {
-  canvas=createCanvas(1500,1500,WEBGL);
+  canvas=createCanvas(windowWidth,windowHeight,WEBGL);
   pixelDensity(1);
   currentScreen=createImage(width,height);
   //randomSeed(2);

@@ -1,4 +1,5 @@
-precision mediump float;
+precision highp float;
+precision highp int;
 
 #define PI 3.14159
 #define SOFT_SHADOW_FACTOR 16.0
@@ -170,7 +171,8 @@ mat3 getRotationMatrix(vec3 angles)
 float getFloatFromTexture(sampler2D inputTexture,int iX,float iY)
 {
   float textureX=(float(iX)+0.5)/float(1000);
-  float rawValue=dot(255.0*texture2D(inputTexture,vec2(textureX,iY)),vec4(1.0,256.0,65536.0,0.0));
+  vec4 textureData=255.0*texture2D(inputTexture,vec2(textureX,iY));
+  float rawValue=dot(floor(textureData+0.5),vec4(1.0,256.0,65536.0,0.0));
   return (rawValue/4000.0)-2000.0;
 }
 
@@ -331,8 +333,9 @@ vec3 getCameraRay(vec2 screenFraction,float cameraScreenSize,out vec3 orthograph
   vec3 cameraRight=cross(cameraForwardUnit,vec3(0.0,0.0,1.0));
   vec3 cameraUp=cross(cameraRight,cameraForwardUnit);
  
+  float aspectRatio=resolution.y/resolution.x;
   float cameraPixelX=mix(-cameraScreenSize,cameraScreenSize,screenFraction.x);
-  float cameraPixelY=mix(-cameraScreenSize,cameraScreenSize,screenFraction.y);
+  float cameraPixelY=mix(-cameraScreenSize,cameraScreenSize,screenFraction.y)*aspectRatio;
   vec3 cameraPixelLocation=(cameraRight*cameraPixelX)+(cameraUp*cameraPixelY); // The location of the pixel on the camera screen.
   orthographicScreenPosition=cameraLocation+cameraPixelLocation;
 
@@ -360,7 +363,7 @@ void main()
   //float cameraScreenSize=tan((PI/2.0)/2.0);
   //vec3 rayD=getCameraRay(screenFraction,cameraScreenSize);
   float lightI=0.7;
-
+  
   vec3 outputColour=vec3(0.0,0.0,0.0); //The output colour of this pixel. Is initally set to black; if too many reflections take place this will be the pixel colour.
   for(int ri=0;ri<MAXIMUM_REFLECTIONS;ri++) //Loops over multiple reflections if needed.
   {
@@ -401,7 +404,6 @@ void main()
       rayD=hitReflect; //The ray direction is updated.
     }
   }
-
 
   gl_FragColor=vec4(outputColour,1.0);
 }
