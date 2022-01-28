@@ -353,10 +353,10 @@ function determineBuildingTiles(largeBuildingChance,smallBuildingChance)
 
 
 //Converts a floating point number into a sequence of three bytes by converting it to base 256. 2000 is added to the input
-//and that is multiplied by 4000 so a large range of floating point values between -2000 and 2000 can be stored.
+//and that is multiplied by 4096 so a large range of floating point values between -2000 and 2000 can be stored.
 function floatToColourArray(input)
 {
-  var remainingInput=(input+2000.0)*4000.0; //The input is shifted and scaled.
+  var remainingInput=(input+2000.0)*4096.0; //The input is shifted and scaled.
   var column3=floor(remainingInput/65536.0); //How many of remainingInput can fit in the 256^2 column.
   remainingInput=remainingInput%65536; //The amount left over that does not fit into the 256^2 column.
   var column2=floor(remainingInput/256.0); 
@@ -409,9 +409,17 @@ function addRoadCross(position)
   addObject(7,position,[0.0,0.0,0.0],[0.0,0.0,0.0],[0.78,0.78,0.78],0);
 }
 
+function randomColour()
+{
+  let hue=random(1.0);
+  var sat=random(0.25,1.0);
+  var br=random(0.5,1.0);
+  return p5.ColorConversion._hsbaToRGBA([hue,sat,br,1.0]).slice(0,3);
+}
+
 function addBuilding(position,scale)
 {
-  var colour=[random(1.0),random(1.0),random(1.0)];
+  var colour=randomColour();
   var rotation=[random(TWO_PI),random(TWO_PI),random(TWO_PI)];
   var buildingType=weightedChoose([1.0,1.0,1.0,1.0,1.0],[9,10,11,12,13]);
   var size=[];
@@ -474,8 +482,7 @@ function setup()
   objectSizes.loadPixels();
   objectColours.loadPixels();
   objectMaterials.loadPixels();
-  groundColour=weightedChoose([1.0,1.0],[[0.35,0.78,0.31],[1.0,0.78,0.31]]);
-  addObject(8,[0.0,0.0,0.0],[0.0,0.0,0.0],[0.0,0.0,0.0],groundColour,0);
+  addObject(8,[0.0,0.0,0.0],[0.0,0.0,0.0],[0.0,0.0,0.0],randomColour(),0);
 
   
   cityTiles=createTileGrid(10,10);

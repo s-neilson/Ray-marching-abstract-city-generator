@@ -173,7 +173,7 @@ float getFloatFromTexture(sampler2D inputTexture,int iX,float iY)
   float textureX=(float(iX)+0.5)/float(1000);
   vec4 textureData=255.0*texture2D(inputTexture,vec2(textureX,iY));
   float rawValue=dot(floor(textureData+0.5),vec4(1.0,256.0,65536.0,0.0));
-  return (rawValue/4000.0)-2000.0;
+  return (rawValue/4096.0)-2000.0;
 }
 
 int getIntFromTexture(sampler2D inputTexture,int iX,float iY)
@@ -206,7 +206,7 @@ float totalSdf(vec3 ray,out int hitObjectInstance)
     vec3 transformedRay=ray-currentObjectPosition; //Shifts the ray to the objects frame of reference.
     transformedRay.x=repeatX? mod(transformedRay.x+5.0,10.0)-5.0 : transformedRay.x; //Does infinite repetition of SDF if needed.
     transformedRay.y=repeatY? mod(transformedRay.y+5.0,10.0)-5.0 : transformedRay.y;
-   
+
     transformedRay=getRotationMatrix(currentObjectRotation)*(transformedRay); //Rotates the ray in the object's frame of reference.
     float currentObjectDistance=9999.9;
 
@@ -290,6 +290,8 @@ vec3 calculateNormal(vec3 p)
   float dSdf_dz=(totalSdf(p+vec3(0.0,0.0,dP),unused)-totalSdf(p-vec3(0.0,0.0,dP),unused))/(2.0*dP);
   return vec3(dSdf_dx,dSdf_dy,dSdf_dz);
 }
+
+
 
 //Determines which object (if any) a ray begining at rayO with a direction of rayD will hit using
 //the ray marching algorithm.
