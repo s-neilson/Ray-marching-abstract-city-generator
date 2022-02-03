@@ -122,8 +122,8 @@ class RoadBuilder
     var rightDirection=(this.currentDirection==3) ? 0:this.currentDirection+1;
     
     var forwardTile=this.currentTile.neighbours[forwardDirection];
-    var leftTile=this.currentTile.neighbours[forwardDirection];
-    var rightTile=this.currentTile.neighbours[forwardDirection];
+    var leftTile=this.currentTile.neighbours[leftDirection];
+    var rightTile=this.currentTile.neighbours[rightDirection];
 
     var forwardBuilder=null;
     var leftBuilder=null;
