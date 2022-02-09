@@ -1,18 +1,22 @@
 var cityTiles=[];
-var roadChoiceWeights=[0.7,0.1,0.1,0.025,0.025,0.025,0.025];
+var tileCount=30;
 var largeBuildingChance=0.1;
 var smallBuildingChance=0.6;
+
+var rSr1=["ffo"];
+var rBlock=["llffffrrfo","llfflo","rrffro","rrffffll"];
+
 
 var renderingShader=null;
 var canvas=null;
 var currentScreen=null;
-var repeatX;
-var repeatY;
+var repeatX,repeatY;
 var renderSquareSize=0.1;
-var rrX=-0.1;
-var rrY=0.0;
+var renderRegionIndex=0;
+var renderRegionCoordinates=null;
 
 var currentObjectIndex=0;
+var cameraLocation;
 var lightD;
 var objectTypes;
 var objectPositions;
@@ -107,110 +111,82 @@ class RoadBuilder
 {
   constructor(startingTile,startingDirection)
   {
-    this.currentTile=startingTile;
-    this.currentDirection=startingDirection;
+    this.startingTile=startingTile;
+    this.startingDirection=startingDirection;
+    
+    //Various directions relative to the starting tile and direction of the RoadBuilder.
+    this.forwardDirection=this.startingDirection;
+    this.leftDirection=(this.startingDirection==0) ? 3:this.startingDirection-1;
+    this.rightDirection=(this.startingDirection==3) ? 0:this.startingDirection+1;
+    this.backwardDirection=(this.startingDirection+2)%4;
   }
   
-  //Randomly chooses new road pieces and lays them. Creates new RoadBuilder objects if an intersection is built.
-  layRoad(newBuilders,removedBuilders,totalRoadPieces)
+  applyRule(rule)
   {
-    totalRoadPieces.value+=1; //The total number of road pieces built is incremented.
+    var newRoadBuilders=[]; //Holds the new Roadbuilders that may be used in the next road building iteration.
     
-    //Various directions and tiles relative to the current tile and direction of the RoadBuilder.
-    var forwardDirection=this.currentDirection;
-    var leftDirection=(this.currentDirection==0) ? 3:this.currentDirection-1;
-    var rightDirection=(this.currentDirection==3) ? 0:this.currentDirection+1;
-    
-    var forwardTile=this.currentTile.neighbours[forwardDirection];
-    var leftTile=this.currentTile.neighbours[leftDirection];
-    var rightTile=this.currentTile.neighbours[rightDirection];
-
-    var forwardBuilder=null;
-    var leftBuilder=null;
-    var rightBuilder=null;
-    
-    
-    switch(weightedChoose(roadChoiceWeights,["straight","left","right","tLeft","tRight","tStraight","cross"])) //A new direction to go in is randomly chosen.
+    for(let subrule of rule) //Each subrule starts relative to the starting tile.
     {
-      case "straight":
-        forwardTile.joinRoadTile(this.currentTile); //The next tile is connected to the current one.
-        this.currentTile=forwardTile; //The RoadBuilder is moved to the next tile.
-        break;
-      case "left":
-        leftTile.joinRoadTile(this.currentTile);
-        this.currentTile=leftTile;
-        this.currentDirection=leftDirection; //The direction of the RoadBuilder is changed.
-        break;
-      case "right":
-        rightTile.joinRoadTile(this.currentTile);
-        this.currentTile=rightTile;
-        this.currentDirection=rightDirection;
-        break;
-      case "tLeft":
-        forwardTile.joinRoadTile(this.currentTile);
-        leftTile.joinRoadTile(this.currentTile);
+      var currentTile=this.startingTile;
+      var currentDirection=this.startingDirection;
+      var exitSubrule=false; //Exits when a new RoadBuilder is to be created.
+      for(let i of subrule)
+      {
+        switch(i) //Determines what to do for the current entry in the rulestring.
+        {
+          case "f":
+            currentDirection=this.forwardDirection;
+            break;
+          case "l":
+            currentDirection=this.leftDirection;
+            break;
+          case "r":
+            currentDirection=this.rightDirection;
+            break;
+          case "b":
+            currentDirection=this.backwardDirection;
+            break;
+          case "o":
+            newRoadBuilders.push(new RoadBuilder(currentTile,currentDirection));
+            exitSubrule=true;
+            break;         
+        }
         
-        forwardBuilder=new RoadBuilder(forwardTile,forwardDirection); //New RoadBuilders are created in order to create new roads off this intersection.
-        leftBuilder=new RoadBuilder(leftTile,leftDirection);
-        newBuilders.push(forwardBuilder,leftBuilder);
-        removedBuilders.push(this); //This builder is removed as it has ended at an intersection.
-        break;
-      case "tRight":
-        forwardTile.joinRoadTile(this.currentTile);
-        rightTile.joinRoadTile(this.currentTile);
+        if(exitSubrule)
+        {
+          break;
+        }
         
-        forwardBuilder=new RoadBuilder(forwardTile,forwardDirection);
-        rightBuilder=new RoadBuilder(rightTile,rightDirection);
-        newBuilders.push(forwardBuilder,rightBuilder);
-        removedBuilders.push(this);
-        break;
-      case "tStraight":
-        leftTile.joinRoadTile(this.currentTile);
-        rightTile.joinRoadTile(this.currentTile);
-        
-        leftBuilder=new RoadBuilder(leftTile,leftDirection);
-        rightBuilder=new RoadBuilder(rightTile,rightDirection);
-        newBuilders.push(leftBuilder,rightBuilder);
-        removedBuilders.push(this);
-        break;
-      case "cross":
-        forwardTile.joinRoadTile(this.currentTile);
-        leftTile.joinRoadTile(this.currentTile);
-        rightTile.joinRoadTile(this.currentTile);
-        
-        forwardBuilder=new RoadBuilder(forwardTile,forwardDirection);
-        leftBuilder=new RoadBuilder(leftTile,leftDirection);
-        rightBuilder=new RoadBuilder(rightTile,rightDirection);
-        newBuilders.push(forwardBuilder,leftBuilder,rightBuilder);
-        removedBuilders.push(this);
-        break;     
+        //The new tile is joined to the current one and then the new tile is made the current one.
+        var newTile=currentTile.neighbours[currentDirection];
+        newTile.joinRoadTile(currentTile);
+        currentTile=newTile;                
+      }
     }
+    
+    return newRoadBuilders;
   }
 }
 
-//Runs RoadBuilders on the array of city tiles until a specified number of roads have been built.
-function runRoadBuilders(numberOfRoadsToBuild)
+//Uses an L system with randomly selected rules to generate a road layout.
+function generateRoadLayout(numberOfIterations,ruleWeights,rules)
 {
-  var totalRoadPieces={"value":0};
-  var initialRoadBuilder=new RoadBuilder(cityTiles[5][5],0); //The first road builder is placed in the middle of the city tile grid.
-  var roadBuilderList=[initialRoadBuilder]; //The list of active RoadBuilders on the city tile grid.
-  
-  while(totalRoadPieces.value<numberOfRoadsToBuild)
+  var currentNumberOfIterations=0;
+  var initialRoadBuilder=new RoadBuilder(cityTiles[floor(random(0,tileCount))][floor(random(0,tileCount))],floor(random(0,4))); //The first road builder is placed in the middle of the city tile grid.
+  var roadBuilders=[initialRoadBuilder]; //The list of active RoadBuilders on the city tile grid.
+
+  while(currentNumberOfIterations<numberOfIterations)
   {
-    var newBuilders=[]; //RoadBuilders created from intersections.
-    var removedBuilders=[]; //RoadBuilders removed after creating an intersection.
+    var newRoadBuilders=[]; 
     
-    for(let i=0;i<roadBuilderList.length;i++) //Loops through all active RoadBuilders and makes them place a road piece each.
+    for(let currentRoadBuilder of roadBuilders)
     {
-      roadBuilderList[i].layRoad(newBuilders,removedBuilders,totalRoadPieces);  
+      var chosenRule=weightedChoose(ruleWeights,rules);
+      newRoadBuilders.push(...currentRoadBuilder.applyRule(chosenRule));
     }
     
-    for(let i=0;i<removedBuilders.length;i++) //Removes all the RoadBuilders fom the active list that were marked for removal in the previous loop.
-    {
-      roadBuilderList.splice(roadBuilderList.indexOf(removedBuilders[i]),1);
-    }
-    
-    roadBuilderList.push(...newBuilders); //Adds the new RoadBuilders to the active list.    
+    roadBuilders=newRoadBuilders; //The newly created RoadBuilders are made active.
+    currentNumberOfIterations+=1;
   }
 }
 
@@ -350,6 +326,28 @@ function determineBuildingTiles(largeBuildingChance,smallBuildingChance)
   }
 }
 
+function getCityCentre()
+{
+  var cx=0.0,cy=0.0;
+  var roadPieceCount=0;
+  for(let ctX of cityTiles)
+  {
+    for(let ctXY of ctX)
+    {
+      if(ctXY.tileType==1)
+      {
+        roadPieceCount+=1;
+        cx+=ctXY.position[0];
+        cy+=ctXY.position[1];
+      }
+    }
+  }
+  
+  cx/=roadPieceCount;
+  cy/=roadPieceCount;
+  return [cx,cy];
+}
+
 
 
 //Converts a floating point number into a sequence of three bytes by converting it to base 256. 2000 is added to the input
@@ -421,7 +419,7 @@ function addBuilding(position,scale)
 {
   var colour=randomColour();
   var rotation=[random(TWO_PI),random(TWO_PI),random(TWO_PI)];
-  var buildingType=weightedChoose([1.0,1.0,1.0,1.0,1.0],[9,10,11,12,13]);
+  var buildingType=weightedChoose([1.0,1.0,1.0,1.0,1.0,1.0],[9,10,11,12,13,14]);
   var size=[];
   var material=weightedChoose([0.95,0.05],[0,1]);
   
@@ -446,12 +444,32 @@ function addBuilding(position,scale)
     case 13:
       size=[random(0.35,0.45),0.0,0.0];
       break;
+    case 14:
+      size=[random(0.35,0.45),0.0,0.0];
+      break;
   }
 
   addObject(buildingType,[position[0],position[1],scale*0.75],rotation,size,colour,material);
 }
 
 
+function generateRenderRegionCoordinates()
+{
+  var rrc=[];
+  
+  var rrX=0.0;
+  while(rrX<0.998)
+  {
+    for(let rrY=0.0;rrY<0.998;rrY+=renderSquareSize)
+    {
+      rrc.push([[rrX,rrY],[rrX+renderSquareSize,rrY+renderSquareSize]]);
+    }
+    
+    rrX+=renderSquareSize;
+  }
+  
+  return rrc;
+}
 
 
 
@@ -466,6 +484,8 @@ function setup()
   canvas=createCanvas(windowWidth,windowHeight,WEBGL);
   pixelDensity(1);
   currentScreen=createImage(width,height);
+  renderRegionCoordinates=generateRenderRegionCoordinates();
+  shuffle(renderRegionCoordinates,true); //Randomizes the order that regions on the screen are rendered.
   //randomSeed(2);
   //randomSeed(64754226562);
   
@@ -483,10 +503,13 @@ function setup()
   objectColours.loadPixels();
   objectMaterials.loadPixels();
   addObject(8,[0.0,0.0,0.0],[0.0,0.0,0.0],[0.0,0.0,0.0],randomColour(),0);
+  
 
   
-  cityTiles=createTileGrid(10,10);
-  runRoadBuilders(30);
+  cityTiles=createTileGrid(tileCount,tileCount);
+  var roadBuilderRules=[rSr1,rBlock];
+  var roadBuilderRuleChances=[0.7,0.3];
+  generateRoadLayout(5,roadBuilderRuleChances,roadBuilderRules);
   determineRoadTiles();
   determineBuildingTiles(largeBuildingChance,smallBuildingChance);
   
@@ -497,6 +520,8 @@ function setup()
   objectColours.updatePixels();
   objectMaterials.updatePixels();
 
+  cityCentre=getCityCentre();
+  cameraLocation=[cityCentre[0]+150.0,cityCentre[1]-150.0,150.0];
   lightD=[random(-1.0,1.0),random(-1.0,1.0),random(0.1,1.0)];
   repeatX=random(1.0)>0.5;
   repeatY=random(1.0)>0.5;
@@ -504,17 +529,26 @@ function setup()
 
 
 function draw() 
-{
+{  
+  if(renderRegionIndex>renderRegionCoordinates.length-1)
+  {
+    noLoop(); //All regions of the image have been rendered.
+    return;
+  }
+  
   currentScreen=canvas.get();
-
+  
+  var currentRrc=renderRegionCoordinates[renderRegionIndex];
+  shader(renderingShader);
   renderingShader.setUniform("resolution",[width,height]);
-  renderingShader.setUniform("renderRegion1",[rrX,rrY]);
-  renderingShader.setUniform("renderRegion2",[rrX+renderSquareSize,rrY+renderSquareSize]);
+  renderingShader.setUniform("renderRegion1",currentRrc[0]);
+  renderingShader.setUniform("renderRegion2",currentRrc[1]);
   renderingShader.setUniform("currentScreen",currentScreen);
-  renderingShader.setUniform("cameraLocation",[150.0,-150.0,150.0]);
+  renderingShader.setUniform("cameraLocation",cameraLocation);
   renderingShader.setUniform("cameraForward",[-1,1,-1]);
   renderingShader.setUniform("lightD",lightD);
   
+  renderingShader.setUniform("repeatLength",float(tileCount));
   renderingShader.setUniform("repeatX",repeatX);
   renderingShader.setUniform("repeatY",repeatY);
   
@@ -526,18 +560,7 @@ function draw()
   renderingShader.setUniform("objectColours",objectColours);
   renderingShader.setUniform("objectMaterials",objectMaterials);
   
-  shader(renderingShader);
-  rect(0,0,width,height);
-
-  rrY+=renderSquareSize;
-  if(rrY>=1.0)
-  {
-    rrY=0.0;
-    rrX+=renderSquareSize;
-  }
-
-  if(rrX>=1.0)
-  {
-    noLoop();
-  }
+  rect(0,0,width,height);  
+  
+  renderRegionIndex+=1;
 }

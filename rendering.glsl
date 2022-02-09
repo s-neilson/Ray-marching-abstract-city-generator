@@ -20,6 +20,7 @@ precision highp int;
 #define OBJ_TORUS 11
 #define OBJ_CONE 12
 #define OBJ_OCTAHEDRON 13
+#define OBJ_TETRAHEDRON 14
 
 #define MAT_DIFFUSE 0
 #define MAT_REFLECT 1
@@ -34,6 +35,7 @@ uniform vec3 lightD;
 
 uniform bool repeatX;
 uniform bool repeatY;
+uniform float repeatLength;
 uniform int objectCount;
 uniform sampler2D objectTypes;
 uniform sampler2D objectPositions;
@@ -90,6 +92,24 @@ float sdfBox(vec3 ray,vec3 size)
 float sdfOctahedron(vec3 ray,float r)
 {
   return dot(normalize(vec3(1.0,1.0,1.0)),abs(ray)-vec3(r,0.0,0.0));
+}
+
+float sdfTetrahedron(vec3 ray,float r)
+{
+  //Vertex positions;
+  float vc=r/3.464;
+  vec3 v1=vec3(-vc,-vc,-vc);
+  vec3 v2=vec3(vc,vc,-vc);
+  vec3 v3=vec3(vc,-vc,vc);
+  vec3 v4=vec3(-vc,vc,vc);
+
+  //Face perpendicular distances.
+  float d1=dot(normalize(v1),ray-v1);
+  float d2=dot(normalize(v2),ray-v2);
+  float d3=dot(normalize(v3),ray-v3);
+  float d4=dot(normalize(v4),ray-v4);
+
+  return max(d1,max(d2,max(d3,d4)));
 }
 
 
@@ -204,8 +224,9 @@ float totalSdf(vec3 ray,out int hitObjectInstance)
     vec3 currentObjectRotation=getVec3FromTexture(objectRotations,i);
 
     vec3 transformedRay=ray-currentObjectPosition; //Shifts the ray to the objects frame of reference.
-    transformedRay.x=repeatX? mod(transformedRay.x+5.0,10.0)-5.0 : transformedRay.x; //Does infinite repetition of SDF if needed.
-    transformedRay.y=repeatY? mod(transformedRay.y+5.0,10.0)-5.0 : transformedRay.y;
+    float hrl=repeatLength/2.0; //Half the repeat length.
+    transformedRay.x=repeatX? mod(transformedRay.x+hrl,repeatLength)-hrl : transformedRay.x; //Does infinite repetition of SDF if needed.
+    transformedRay.y=repeatY? mod(transformedRay.y+hrl,repeatLength)-hrl : transformedRay.y;
 
     transformedRay=getRotationMatrix(currentObjectRotation)*(transformedRay); //Rotates the ray in the object's frame of reference.
     float currentObjectDistance=9999.9;
@@ -265,6 +286,10 @@ float totalSdf(vec3 ray,out int hitObjectInstance)
     else if(currentObjectType==OBJ_OCTAHEDRON)
     {
       currentObjectDistance=sdfOctahedron(transformedRay,currentObjectSize[0]);
+    }
+    else if(currentObjectType==OBJ_TETRAHEDRON)
+    {
+      currentObjectDistance=sdfTetrahedron(transformedRay,currentObjectSize[0]);
     }
 
     if(currentObjectDistance<closestObjectDistance) //If the current object is now the closest found so far.
@@ -360,7 +385,7 @@ void main()
   }
 
   vec3 rayO=cameraLocation;
-  getCameraRay(screenFraction,15.0,rayO); 
+  getCameraRay(screenFraction,30.0,rayO); 
   vec3 rayD=normalize(cameraForward);
   //float cameraScreenSize=tan((PI/2.0)/2.0);
   //vec3 rayD=getCameraRay(screenFraction,cameraScreenSize);
