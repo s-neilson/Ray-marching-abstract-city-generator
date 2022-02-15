@@ -273,6 +273,18 @@ function determineRoadTiles()
         case "true,true,true,true": //Cross intersection.
           addRoadCross(ctXY.position);
           break; 
+        case "true,false,false,false": //Up dead end.
+          addRoadEnd(ctXY.position,0);
+          break;
+        case "false,true,false,false": //Right dead end.
+          addRoadEnd(ctXY.position,3);
+          break;
+        case "false,false,true,false": //Down dead end.
+          addRoadEnd(ctXY.position,2);
+          break;
+        case "false,false,false,true": //Left dead end.
+          addRoadEnd(ctXY.position,1);
+          break;
         default:
           isRoadTile=false;
       }
@@ -386,25 +398,31 @@ function addObject(type,position,rotation,size,colour,material)
 function addRoadStraight(position,direction)
 {
   addObject(0,position,[0.0,0.0,HALF_PI*direction],[0.0,0.0,0.0],[0.4,0.4,0.4],0);
-  addObject(4,position,[0.0,0.0,HALF_PI*direction],[0.0,0.0,0.0],[0.78,0.78,0.78],0);
+  addObject(5,position,[0.0,0.0,HALF_PI*direction],[0.0,0.0,0.0],[0.78,0.78,0.78],0);
 }
 
 function addRoadCurve(position,direction)
 {
   addObject(1,position,[0.0,0.0,HALF_PI*direction],[0.0,0.0,0.0],[0.4,0.4,0.4],0);
-  addObject(5,position,[0.0,0.0,HALF_PI*direction],[0.0,0.0,0.0],[0.78,0.78,0.78],0);
+  addObject(6,position,[0.0,0.0,HALF_PI*direction],[0.0,0.0,0.0],[0.78,0.78,0.78],0);
 }
 
 function addRoadT(position,direction)
 {
   addObject(2,position,[0.0,0.0,HALF_PI*direction],[0.0,0.0,0.0],[0.4,0.4,0.4],0);
-  addObject(6,position,[0.0,0.0,HALF_PI*direction],[0.0,0.0,0.0],[0.78,0.78,0.78],0);
+  addObject(7,position,[0.0,0.0,HALF_PI*direction],[0.0,0.0,0.0],[0.78,0.78,0.78],0);
 }
 
 function addRoadCross(position)
 {
   addObject(3,position,[0.0,0.0,0.0],[0.0,0.0,0.0],[0.4,0.4,0.4],0);
-  addObject(7,position,[0.0,0.0,0.0],[0.0,0.0,0.0],[0.78,0.78,0.78],0);
+  addObject(8,position,[0.0,0.0,0.0],[0.0,0.0,0.0],[0.78,0.78,0.78],0);
+}
+
+function addRoadEnd(position,direction)
+{
+  addObject(4,position,[0.0,0.0,HALF_PI*direction],[0.0,0.0,0.0],[0.4,0.4,0.4],0);
+  addObject(9,position,[0.0,0.0,HALF_PI*direction],[0.0,0.0,0.0],[0.78,0.78,0.78],0);
 }
 
 function randomColour()
@@ -419,32 +437,32 @@ function addBuilding(position,scale)
 {
   var colour=randomColour();
   var rotation=[random(TWO_PI),random(TWO_PI),random(TWO_PI)];
-  var buildingType=weightedChoose([1.0,1.0,1.0,1.0,1.0,1.0],[9,10,11,12,13,14]);
+  var buildingType=weightedChoose([1.0,1.0,1.0,1.0,1.0,1.0],[11,12,13,14,15,16]);
   var size=[];
   var material=weightedChoose([0.95,0.05],[0,1]);
   
   switch(buildingType)
   {
-    case 9:
+    case 11:
       size=[scale*random(0.35,0.45),0.0,0.0];
       break;
-    case 10:
+    case 12:
       size=[scale*random(0.35,0.45),scale*random(0.35,0.45),scale*random(0.35,0.45)];
       break;
-    case 11:
+    case 13:
       var r1=random(0.35,0.45);
       var r2=random(0.1,0.9)*r1;
       size=[scale*r1,scale*r2,0.0];
       break;
-    case 12:
+    case 14:
       var r=random(0.35,0.45);
       var h=random(0.7,0.9);
       size=[scale*r,scale*h,0.0];
       break;
-    case 13:
+    case 15:
       size=[random(0.35,0.45),0.0,0.0];
       break;
-    case 14:
+    case 16:
       size=[random(0.35,0.45),0.0,0.0];
       break;
   }
@@ -485,9 +503,10 @@ function setup()
   pixelDensity(1);
   currentScreen=createImage(width,height);
   renderRegionCoordinates=generateRenderRegionCoordinates();
-  shuffle(renderRegionCoordinates,true); //Randomizes the order that regions on the screen are rendered.
   //randomSeed(2);
   //randomSeed(64754226562);
+  shuffle(renderRegionCoordinates,true); //Randomizes the order that regions on the screen are rendered.
+  
   
   objectTypes=createImage(1000,1);
   objectPositions=createImage(1000,3);
@@ -502,7 +521,7 @@ function setup()
   objectSizes.loadPixels();
   objectColours.loadPixels();
   objectMaterials.loadPixels();
-  addObject(8,[0.0,0.0,0.0],[0.0,0.0,0.0],[0.0,0.0,0.0],randomColour(),0);
+  addObject(10,[0.0,0.0,0.0],[0.0,0.0,0.0],[0.0,0.0,0.0],randomColour(),0);
   
 
   

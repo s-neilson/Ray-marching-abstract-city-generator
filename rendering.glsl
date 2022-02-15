@@ -10,17 +10,19 @@ precision highp int;
 #define OBJ_ROADCURVE 1
 #define OBJ_ROADT 2
 #define OBJ_ROADCROSS 3
-#define OBJ_FOOTPATHSTRAIGHT 4
-#define OBJ_FOOTPATHCURVE 5
-#define OBJ_FOOTPATHT 6
-#define OBJ_FOOTPATHCROSS 7
-#define OBJ_PLANE 8
-#define OBJ_SPHERE 9
-#define OBJ_BOX 10
-#define OBJ_TORUS 11
-#define OBJ_CONE 12
-#define OBJ_OCTAHEDRON 13
-#define OBJ_TETRAHEDRON 14
+#define OBJ_ROADEND 4
+#define OBJ_FOOTPATHSTRAIGHT 5
+#define OBJ_FOOTPATHCURVE 6
+#define OBJ_FOOTPATHT 7
+#define OBJ_FOOTPATHCROSS 8
+#define OBJ_FOOTPATHEND 9
+#define OBJ_PLANE 10
+#define OBJ_SPHERE 11
+#define OBJ_BOX 12
+#define OBJ_TORUS 13
+#define OBJ_CONE 14
+#define OBJ_OCTAHEDRON 15
+#define OBJ_TETRAHEDRON 16
 
 #define MAT_DIFFUSE 0
 #define MAT_REFLECT 1
@@ -66,7 +68,6 @@ float sdfTorus(vec3 ray,float r1,float r2)
   return length(ringCoordinates(ray,r1))-r2;
 }
 
-
 float sdfCone(vec3 ray,float r,float h)
 {
   vec2 circumfrenceCoordinates=ringCoordinates(ray,r); //The cone's side is made from the revolution of a triangle of width "r" and height "h".
@@ -88,6 +89,12 @@ float sdfBox(vec3 ray,vec3 size)
   return length(externalFaceDistances)+closestInternalFaceDistance; //If two face distances are inside this gives the distance to one of the box's face, one face distance inside gives the distance to one of the box's edges and no face distances inside gives the distance to one of the box's corners. It gives the distance (negative) to the closest face if the ray is inside the box. 
 }
 
+//Gives the SDF of a 3D annulus of height h, thickness t and a radius (the distance from 0,0,0 to the centre of the solid ring's thickness) of r.
+float sdfAnnulus(vec3 ray,float r,float t,float h)
+{
+  vec2 ringCoordinatesRay=ringCoordinates(ray,r);
+  return sdfBox(vec3(ringCoordinatesRay.x,0.0,ringCoordinatesRay.y),vec3(t,0.2,h)/2.0);
+}
 
 float sdfOctahedron(vec3 ray,float r)
 {
@@ -120,10 +127,7 @@ float sdfRoadStraight(vec3 ray)
 
 float sdfRoadCurve(vec3 ray)
 {
-  vec3 transformedRay=vec3(ray.x+0.5,ray.y-0.5,ray.z); //The origin of the curve's radius is at relative position -0.5,0.5,0
-  vec2 ringCoordinatesRay=ringCoordinates(transformedRay,0.5);
-  vec3 crossSectionRingCoordinates=vec3(ringCoordinatesRay.x,0.0,ringCoordinatesRay.y);
-  float sdfRoadAnnulus=sdfBox(crossSectionRingCoordinates,vec3(0.25,0.1,0.0625)); //The sdf of an annulus road is the road cross section revolved around the origin point.
+  float sdfRoadAnnulus=sdfAnnulus(ray-vec3(-0.5,0.5,0.0),0.5,0.5,0.125); //The sdf of an annulus road is the road cross section revolved around the origin point.
   return max(max(sdfRoadAnnulus,-(ray.x+0.5)),ray.y-0.5); //The annulus road is cut into a quarter to make a curved road piece.
 }
 
@@ -135,6 +139,12 @@ float sdfRoadT(vec3 ray)
 float sdfRoadCross(vec3 ray)
 {
   return min(sdfRoadStraight(ray),sdfBox(ray,vec3(0.25,0.5,0.0625)));
+}
+
+float sdfRoadEnd(vec3 ray)
+{
+  float cylinderSdf=sdfAnnulus(ray,0.125,0.25,0.125);
+  return min(cylinderSdf,sdfBox(ray-vec3(0.0,0.25,0.0),vec3(0.25,0.25,0.0625)));
 }
 
 float sdfFootpathHalfStraight(vec3 ray)
@@ -149,11 +159,11 @@ float sdfFootpathStraight(vec3 ray)
 
 float sdfFootpathCurve(vec3 ray)
 {
-  vec3 transformedRay=vec3(ray.x+0.5,ray.y-0.5,ray.z);
-  vec2 ringCoordinatesRay=ringCoordinates(transformedRay,0.5);
-  vec3 crossSectionRingCoordinates=vec3(ringCoordinatesRay.x,0.0,ringCoordinatesRay.y);
-  float sdfFootpathAnnuli=sdfBox(abs(crossSectionRingCoordinates)-vec3(0.3125,0.0,0.0),vec3(0.0625,0.1,0.125));
-  return max(max(sdfFootpathAnnuli,-(ray.x+0.5)),ray.y-0.5);
+  vec3 centrePosition=vec3(-0.5,0.5,0.0);
+  float innerAnnulusSdf=sdfAnnulus(ray-centrePosition,0.1875,0.125,0.25);
+  float outerAnnulusSdf=sdfAnnulus(ray-centrePosition,0.8125,0.125,0.25);
+  float uncutFootpathSdf=min(innerAnnulusSdf,outerAnnulusSdf);
+  return max(max(uncutFootpathSdf,-(ray.x+0.5)),ray.y-0.5);
 }
 
 float sdfFootpathQuarterCross(vec3 ray)
@@ -170,6 +180,13 @@ float sdfFootpathT(vec3 ray)
 float sdfFootpathCross(vec3 ray)
 {
   return sdfFootpathQuarterCross(abs(ray));
+}
+
+float sdfFootpathEnd(vec3 ray)
+{
+  float straightSdf=max(-ray.y,sdfFootpathStraight(ray.yxz));
+  float curvedSdf=max(ray.y,sdfAnnulus(ray,0.3125,0.125,0.25));
+  return min(straightSdf,curvedSdf);
 }
 
 
@@ -251,6 +268,10 @@ float totalSdf(vec3 ray,out int hitObjectInstance)
     {
       currentObjectDistance=sdfRoadCross(transformedRay);
     }  
+    else if(currentObjectType==OBJ_ROADEND)
+    {
+      currentObjectDistance=sdfRoadEnd(transformedRay);
+    }
     else if(currentObjectType==OBJ_FOOTPATHSTRAIGHT)
     {
       currentObjectDistance=sdfFootpathStraight(transformedRay);
@@ -266,6 +287,10 @@ float totalSdf(vec3 ray,out int hitObjectInstance)
     else if(currentObjectType==OBJ_FOOTPATHCROSS)
     {
       currentObjectDistance=sdfFootpathCross(transformedRay);
+    }
+    else if(currentObjectType==OBJ_FOOTPATHEND)
+    {
+      currentObjectDistance=sdfFootpathEnd(transformedRay);
     }
     else if(currentObjectType==OBJ_SPHERE)
     {
@@ -413,7 +438,6 @@ void main()
     if(hitObjectMaterial==MAT_DIFFUSE)
     {
       outputColour=lambertianReflectance(hitNormal,hitObjectColour,lightI);
-
       //Shadows are created by seeing if anything is blocking hitPosition in the direction of the light.
       //The hit position is slightly moved outwards in the direction of the normal so the ray does not
       //immediately collide with the object that was originally hit. To simulate an extended light source,
