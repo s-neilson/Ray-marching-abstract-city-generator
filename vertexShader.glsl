@@ -1,6 +1,7 @@
+#version 300 es
 precision mediump float;
 
-attribute vec3 aPosition;
+in vec3 aPosition;
 
 void main()
 {
