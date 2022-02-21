@@ -1,3 +1,5 @@
+#version 300 es
+
 precision highp float;
 precision highp int;
 
@@ -35,9 +37,6 @@ uniform vec3 cameraLocation;
 uniform vec3 cameraForward;
 uniform vec3 lightD;
 
-uniform bool repeatX;
-uniform bool repeatY;
-uniform float repeatLength;
 uniform int objectCount;
 uniform sampler2D objectTypes;
 uniform sampler2D objectPositions;
@@ -45,6 +44,12 @@ uniform sampler2D objectRotations;
 uniform sampler2D objectSizes;
 uniform sampler2D objectColours;
 uniform sampler2D objectMaterials;
+
+uniform int bvhNodeCount;
+uniform sampler2D bvhCentres;
+uniform sampler2D bvhRadii;
+uniform sampler2D bvhChild1;
+uniform sampler2D bvhChild2;
 
 //All SDFs are centred at position 0,0,0.
 float sdfPlane(vec3 ray)
@@ -204,122 +209,184 @@ mat3 getRotationMatrix(vec3 angles)
   return mat3(Cz*Cy,(Cz*Sy*Sx)-(Sz*Cx),(Cz*Sy*Cx)+(Sz*Sx),Sz*Cy,(Sz*Sy*Sx)+(Cz*Cx),(Sz*Sy*Cx)-(Cz*Sx),(-1.0)*Sy,Cy*Sx,Cy*Cx);
 }
 
-
-float getFloatFromTexture(sampler2D inputTexture,int iX,float iY)
+float getRawPackedFromTexture(sampler2D inputTexture,int iX,int iY)
 {
-  float textureX=(float(iX)+0.5)/float(1000);
-  vec4 textureData=255.0*texture2D(inputTexture,vec2(textureX,iY));
-  float rawValue=dot(floor(textureData+0.5),vec4(1.0,256.0,65536.0,0.0));
-  return (rawValue/4096.0)-2000.0;
+  vec4 textureData=255.0*texelFetch(inputTexture,ivec2(iX,iY),0);
+  return dot(floor(textureData+0.5),vec4(1.0,256.0,65536.0,0.0));
 }
 
-int getIntFromTexture(sampler2D inputTexture,int iX,float iY)
+float getFloatFromTexture(sampler2D inputTexture,int iX,int iY)
 {
-  return int(floor(getFloatFromTexture(inputTexture,iX,iY)+0.5));
+  return (getRawPackedFromTexture(inputTexture,iX,iY)/4096.0)-2000.0;
+}
+
+int getIntFromTexture(sampler2D inputTexture,int iX,int iY)
+{
+  float shiftedRawValue=getRawPackedFromTexture(inputTexture,iX,iY)-8388608.0;
+  return int(floor(shiftedRawValue+0.5));
 }
 
 vec3 getVec3FromTexture(sampler2D inputTexture,int iX)
 {
-  return vec3(getFloatFromTexture(inputTexture,iX,0.167),getFloatFromTexture(inputTexture,iX,0.5),getFloatFromTexture(inputTexture,iX,0.833));
+  return vec3(getFloatFromTexture(inputTexture,iX,0),getFloatFromTexture(inputTexture,iX,1),getFloatFromTexture(inputTexture,iX,2));
 }
 
 
-float totalSdf(vec3 ray,out int hitObjectInstance)
+void push(out int[32] stack,out int pointer,int value)
 {
-  float closestObjectDistance=9999.8;
+  pointer+=1;
+  stack[pointer]=value;
+}
 
-  for(int i=0;i>-1;i++) //Loops over all objects in the scene to find the closest to the vector "ray".
+int pop(out int[32] stack,out int pointer)
+{
+  pointer-=1;
+  return stack[pointer+1];
+}
+
+//Gets the SDF of a particular object based on its index.
+float objectSdf(vec3 ray,int objectIndex)
+{
+  int currentObjectType=getIntFromTexture(objectTypes,objectIndex,0);
+  vec3 currentObjectPosition=getVec3FromTexture(objectPositions,objectIndex);
+  vec3 currentObjectSize=getVec3FromTexture(objectSizes,objectIndex);
+  vec3 currentObjectRotation=getVec3FromTexture(objectRotations,objectIndex);
+
+  vec3 transformedRay=ray-currentObjectPosition; //Shifts the ray to the objects frame of reference.
+
+  transformedRay=getRotationMatrix(currentObjectRotation)*(transformedRay); //Rotates the ray in the object's frame of reference.
+  float currentObjectDistance=9999.9;
+
+  if(currentObjectType==OBJ_PLANE)
   {
-    if(i==objectCount) //If there are no more objects to determine the SDFs for.
+    return sdfPlane(transformedRay);    
+  }
+  else if(currentObjectType==OBJ_ROADSTRAIGHT)
+  {
+    return sdfRoadStraight(transformedRay);
+  }  
+  else if(currentObjectType==OBJ_ROADCURVE)
+  {
+    return sdfRoadCurve(transformedRay);
+  } 
+  else if(currentObjectType==OBJ_ROADT)
+  {
+    return sdfRoadT(transformedRay);
+  }  
+  else if(currentObjectType==OBJ_ROADCROSS)
+  {
+    return sdfRoadCross(transformedRay);
+  }  
+  else if(currentObjectType==OBJ_ROADEND)
+  {
+    return sdfRoadEnd(transformedRay);
+  }
+  else if(currentObjectType==OBJ_FOOTPATHSTRAIGHT)
+  {
+    return sdfFootpathStraight(transformedRay);
+  } 
+  else if(currentObjectType==OBJ_FOOTPATHCURVE)
+  {
+    return sdfFootpathCurve(transformedRay);
+  }
+  else if(currentObjectType==OBJ_FOOTPATHT)
+  {
+    return sdfFootpathT(transformedRay);
+  }
+  else if(currentObjectType==OBJ_FOOTPATHCROSS)
+  {
+    return sdfFootpathCross(transformedRay);
+  }
+  else if(currentObjectType==OBJ_FOOTPATHEND)
+  {
+    return sdfFootpathEnd(transformedRay);
+  }
+  else if(currentObjectType==OBJ_SPHERE)
+  {
+    return sdfSphere(transformedRay,currentObjectSize[0]);
+  }
+  else if(currentObjectType==OBJ_BOX)
+  {
+    return sdfBox(transformedRay,currentObjectSize);
+  }
+  else if(currentObjectType==OBJ_TORUS)
+  {
+    return sdfTorus(transformedRay,currentObjectSize[0],currentObjectSize[1]);
+  }
+  else if(currentObjectType==OBJ_CONE)
+  {
+    return sdfCone(transformedRay,currentObjectSize[0],currentObjectSize[1]);
+  }
+  else if(currentObjectType==OBJ_OCTAHEDRON)
+  {
+    return sdfOctahedron(transformedRay,currentObjectSize[0]);
+  }
+  else if(currentObjectType==OBJ_TETRAHEDRON)
+  {
+    return sdfTetrahedron(transformedRay,currentObjectSize[0]);
+  }
+}
+
+bool rayIntersectsBvhNode(vec3 rayO,vec3 rayD,int bvhNodeIndex)
+{
+  vec3 bnC=getVec3FromTexture(bvhCentres,bvhNodeIndex);
+  float bnR=getFloatFromTexture(bvhRadii,bvhNodeIndex,0);
+  
+  vec3 bn_ray=bnC-rayO;
+  float bnRayDistance=distance(bnC,rayO);
+  float bn_ray_projRayD=dot(bn_ray,rayD);
+
+  bool bnInFront=dot(bn_ray,rayD)>0.0; //If the current BVH node is not behind the ray.
+  bool intersects=pow(bnRayDistance,2.0)-pow(bn_ray_projRayD,2.0)<=pow(bnR,2.0); //The ray collides with the BNH node's sphere.
+  bool intersectsInFront=bnInFront&&intersects;
+  bool rayInside=bnRayDistance<bnR; //The ray collides with the BVH node because it is inside it.
+  return intersectsInFront||rayInside;  
+}
+
+
+float totalSdf(vec3 ray,vec3 rayD,out int closestObjectIndex)
+{
+  int nodeStack[32];
+  int nodeStackPointer=-1;
+  int objectStack[32];
+  int objectStackPointer=-1;
+
+  push(nodeStack,nodeStackPointer,bvhNodeCount-1); //The root node is added for exploration.
+  
+  //The BVH hierarchy is explored depth-first in order to exclude objects that the ray cannot possibly hit.
+  while(nodeStackPointer!=-1)
+  { 
+    int currentNodeIndex=pop(nodeStack,nodeStackPointer);
+    if(!rayIntersectsBvhNode(ray,rayD,currentNodeIndex))
     {
-      break;
+      continue; //The ray does not intersect this node, meaning that there are no objects below this node in the hierarchy that the ray can possibly hit.
     }
 
-    int currentObjectType=getIntFromTexture(objectTypes,i,0.5);
-    vec3 currentObjectPosition=getVec3FromTexture(objectPositions,i);
-    vec3 currentObjectSize=getVec3FromTexture(objectSizes,i);
-    vec3 currentObjectRotation=getVec3FromTexture(objectRotations,i);
+    int child1Index=getIntFromTexture(bvhChild1,currentNodeIndex,0);
+    int child2Index=getIntFromTexture(bvhChild2,currentNodeIndex,0);
 
-    vec3 transformedRay=ray-currentObjectPosition; //Shifts the ray to the objects frame of reference.
-    float hrl=repeatLength/2.0; //Half the repeat length.
-    transformedRay.x=repeatX? mod(transformedRay.x+hrl,repeatLength)-hrl : transformedRay.x; //Does infinite repetition of SDF if needed.
-    transformedRay.y=repeatY? mod(transformedRay.y+hrl,repeatLength)-hrl : transformedRay.y;
+    if(child1Index>=9999) //It is a leaf node with a renderable object inside.
+    {
+      push(objectStack,objectStackPointer,child1Index-9999);
+    }
+    else //The child BVH nodes are added for exploration.
+    {
+      push(nodeStack,nodeStackPointer,child1Index);
+      push(nodeStack,nodeStackPointer,child2Index);
+    }
+  }
 
-    transformedRay=getRotationMatrix(currentObjectRotation)*(transformedRay); //Rotates the ray in the object's frame of reference.
-    float currentObjectDistance=9999.9;
 
-    if(currentObjectType==OBJ_PLANE)
-    {
-      currentObjectDistance=sdfPlane(transformedRay);    
-    }
-    else if(currentObjectType==OBJ_ROADSTRAIGHT)
-    {
-      currentObjectDistance=sdfRoadStraight(transformedRay);
-    }  
-    else if(currentObjectType==OBJ_ROADCURVE)
-    {
-      currentObjectDistance=sdfRoadCurve(transformedRay);
-    } 
-    else if(currentObjectType==OBJ_ROADT)
-    {
-      currentObjectDistance=sdfRoadT(transformedRay);
-    }  
-    else if(currentObjectType==OBJ_ROADCROSS)
-    {
-      currentObjectDistance=sdfRoadCross(transformedRay);
-    }  
-    else if(currentObjectType==OBJ_ROADEND)
-    {
-      currentObjectDistance=sdfRoadEnd(transformedRay);
-    }
-    else if(currentObjectType==OBJ_FOOTPATHSTRAIGHT)
-    {
-      currentObjectDistance=sdfFootpathStraight(transformedRay);
-    } 
-    else if(currentObjectType==OBJ_FOOTPATHCURVE)
-    {
-      currentObjectDistance=sdfFootpathCurve(transformedRay);
-    }
-    else if(currentObjectType==OBJ_FOOTPATHT)
-    {
-      currentObjectDistance=sdfFootpathT(transformedRay);
-    }
-    else if(currentObjectType==OBJ_FOOTPATHCROSS)
-    {
-      currentObjectDistance=sdfFootpathCross(transformedRay);
-    }
-    else if(currentObjectType==OBJ_FOOTPATHEND)
-    {
-      currentObjectDistance=sdfFootpathEnd(transformedRay);
-    }
-    else if(currentObjectType==OBJ_SPHERE)
-    {
-      currentObjectDistance=sdfSphere(transformedRay,currentObjectSize[0]);
-    }
-    else if(currentObjectType==OBJ_BOX)
-    {
-      currentObjectDistance=sdfBox(transformedRay,currentObjectSize);
-    }
-    else if(currentObjectType==OBJ_TORUS)
-    {
-      currentObjectDistance=sdfTorus(transformedRay,currentObjectSize[0],currentObjectSize[1]);
-    }
-    else if(currentObjectType==OBJ_CONE)
-    {
-      currentObjectDistance=sdfCone(transformedRay,currentObjectSize[0],currentObjectSize[1]);
-    }
-    else if(currentObjectType==OBJ_OCTAHEDRON)
-    {
-      currentObjectDistance=sdfOctahedron(transformedRay,currentObjectSize[0]);
-    }
-    else if(currentObjectType==OBJ_TETRAHEDRON)
-    {
-      currentObjectDistance=sdfTetrahedron(transformedRay,currentObjectSize[0]);
-    }
+  float closestObjectDistance=9999.8;
+  push(objectStack,objectStackPointer,0); //The ground's SDF is always calculated.
+  while(objectStackPointer!=-1) //Loops over all objects in the object stack to find the closest to the vector "ray".
+  {
+    int objectIndex=pop(objectStack,objectStackPointer);
+    float currentObjectDistance=objectSdf(ray,objectIndex);
 
     if(currentObjectDistance<closestObjectDistance) //If the current object is now the closest found so far.
     {
-      hitObjectInstance=i;
+      closestObjectIndex=objectIndex;
       closestObjectDistance=currentObjectDistance;
     }
   }
@@ -327,27 +394,24 @@ float totalSdf(vec3 ray,out int hitObjectInstance)
   return closestObjectDistance;
 }
 
-//Calculates the normal at a particular point by determining the gradient of the total scene's SDF at that point.
+//Calculates the normal at a particular point of a certain object by determining the gradient of the objects's SDF at that point.
 //If an SDF can be approximated by a plane on small scales, then the normal can be approximated by the normal of
 //a plane, which is equal to the gradient of its SDF.
-vec3 calculateNormal(vec3 p)
+vec3 calculateNormal(vec3 p,int hitObjectIndex)
 {
-  int unused=0; //out type variable for totalSDF that is not used.
-
   float dP=0.0005; //The change in each ordinate of p to calculate the derivatives with.
-  float dSdf_dx=(totalSdf(p+vec3(dP,0.0,0.0),unused)-totalSdf(p-vec3(dP,0.0,0.0),unused))/(2.0*dP);
-  float dSdf_dy=(totalSdf(p+vec3(0.0,dP,0.0),unused)-totalSdf(p-vec3(0.0,dP,0.0),unused))/(2.0*dP);
-  float dSdf_dz=(totalSdf(p+vec3(0.0,0.0,dP),unused)-totalSdf(p-vec3(0.0,0.0,dP),unused))/(2.0*dP);
+  float dSdf_dx=(objectSdf(p+vec3(dP,0.0,0.0),hitObjectIndex)-objectSdf(p-vec3(dP,0.0,0.0),hitObjectIndex))/(2.0*dP);
+  float dSdf_dy=(objectSdf(p+vec3(0.0,dP,0.0),hitObjectIndex)-objectSdf(p-vec3(0.0,dP,0.0),hitObjectIndex))/(2.0*dP);
+  float dSdf_dz=(objectSdf(p+vec3(0.0,0.0,dP),hitObjectIndex)-objectSdf(p-vec3(0.0,0.0,dP),hitObjectIndex))/(2.0*dP);
   return vec3(dSdf_dx,dSdf_dy,dSdf_dz);
 }
 
 
-
 //Determines which object (if any) a ray begining at rayO with a direction of rayD will hit using
 //the ray marching algorithm.
-vec3 marchRay(in vec3 rayO,vec3 rayD,out int hitObjectInstance,out float minimumHitAngle)
+vec3 marchRay(in vec3 rayO,vec3 rayD,out int hitObjectIndex,out float minimumHitAngle)
 {
-  hitObjectInstance=-1; //The default value of negative 1 means that the ray has either gone too far or taken too many iterations to march.
+  hitObjectIndex=-1; //The default value of negative 1 means that the ray has either gone too far or taken too many iterations to march.
   minimumHitAngle=1.0/SOFT_SHADOW_FACTOR; //This is an estimation of the smallest angle between the marching ray and an object. Used for soft shadows to simulate a non-point light source.
   vec3 ray=rayO;
 
@@ -359,13 +423,13 @@ vec3 marchRay(in vec3 rayO,vec3 rayD,out int hitObjectInstance,out float minimum
       break;
     }
     
-    int closestObjectInstance=0;
-    float closestDistance=totalSdf(ray,closestObjectInstance);
+    int closestObjectIndex=0;
+    float closestDistance=totalSdf(ray,rayD,closestObjectIndex);
     minimumHitAngle=min(minimumHitAngle,max(closestDistance,0.0)/(marchDistance+0.0001)); //Uses the small angle approximation tan(x)=x, assumes that the rayO-closest hit point vector is perpendicular to rayD.
 
     if(closestDistance<0.001) //If ray is within 0.001 if the closest object, it is considered to have hit it.
     {
-      hitObjectInstance=closestObjectInstance;
+      hitObjectIndex=closestObjectIndex;
       minimumHitAngle=0.0;
       break;
     }
@@ -400,12 +464,13 @@ vec3 lambertianReflectance(vec3 n,vec3 colour,float lightI)
   return colour*(dot(n,normalize(lightD))*lightI);
 }
 
+out vec4 fragColour;
 void main()
 {
   vec2 screenFraction=gl_FragCoord.xy/resolution.xy;
   if((screenFraction.x<renderRegion1.x)||(screenFraction.x>renderRegion2.x)||(screenFraction.y<renderRegion1.y)||(screenFraction.y>renderRegion2.y)) //If the current pixel is outside the render region.
   {
-    gl_FragColor=texture2D(currentScreen,vec2(screenFraction.x,1.0-screenFraction.y)); //Use the existing pre-rendered pixels.
+    fragColour=texelFetch(currentScreen,ivec2(gl_FragCoord.x,resolution.y-gl_FragCoord.y),0); //Use the existing pre-rendered pixels.
     return;
   }
 
@@ -419,20 +484,20 @@ void main()
   vec3 outputColour=vec3(0.0,0.0,0.0); //The output colour of this pixel. Is initally set to black; if too many reflections take place this will be the pixel colour.
   for(int ri=0;ri<MAXIMUM_REFLECTIONS;ri++) //Loops over multiple reflections if needed.
   {
-    int hitObjectInstance=0;
+    int hitObjectIndex=0;
     float minimumHitAngle=0.0;
-    vec3 hitPosition=marchRay(rayO,rayD,hitObjectInstance,minimumHitAngle);
-    vec3 hitNormal=calculateNormal(hitPosition);
+    vec3 hitPosition=marchRay(rayO,rayD,hitObjectIndex,minimumHitAngle);
+    vec3 hitNormal=calculateNormal(hitPosition,hitObjectIndex);
 
-    if(hitObjectInstance==-1) //If the ray has gone very far or taken too long without hitting anything it is assumed to hit the sky.
+    if(hitObjectIndex==-1) //If the ray has gone very far or taken too long without hitting anything it is assumed to hit the sky.
     {
       outputColour=mix(vec3(0.31,0.59,1.0),vec3(0.0,0.4,1.0),rayD.z);
       break;
     }
 
     //The colour and material of the hit object is determined.
-    vec3 hitObjectColour=getVec3FromTexture(objectColours,hitObjectInstance); 
-    int hitObjectMaterial=getIntFromTexture(objectMaterials,hitObjectInstance,0.5);
+    vec3 hitObjectColour=getVec3FromTexture(objectColours,hitObjectIndex); 
+    int hitObjectMaterial=getIntFromTexture(objectMaterials,hitObjectIndex,0);
 
     
     if(hitObjectMaterial==MAT_DIFFUSE)
@@ -456,5 +521,5 @@ void main()
     }
   }
 
-  gl_FragColor=vec4(outputColour,1.0);
+  fragColour=vec4(outputColour,1.0);
 }

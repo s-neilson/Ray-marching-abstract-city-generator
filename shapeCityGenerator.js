@@ -1,5 +1,5 @@
 var cityTiles=[];
-var tileCount=30;
+var tileCount=60;
 var largeBuildingChance=0.1;
 var smallBuildingChance=0.6;
 
@@ -10,21 +10,23 @@ var rBlock=["llffffrrfo","llfflo","rrffro","rrffffll"];
 var renderingShader=null;
 var canvas=null;
 var currentScreen=null;
-var repeatX,repeatY;
+
 var renderSquareSize=0.1;
 var renderRegionIndex=0;
 var renderRegionCoordinates=null;
 
 var currentObjectIndex=0;
+var currentBvhNodeIndex=0;
+var sceneObjects=[];
 var cameraLocation;
 var lightD;
-var objectTypes;
-var objectPositions;
-var objectRotations;
-var objectSizes;
-var objectColours;
-var objectMaterials;
+var objectTypes,objectPositions,objectRotations,objectSizes,objectColours,objectMaterials;
 
+var bvhCentres,bvhRadii;
+var bvhChild1,bvhChild2;
+
+var timeNotStarted=true;
+var timeStart;
 
 //Chooses a random item from a list given weights for all of them. Based on the "Linear Scan"
 //example from https://blog.bruce-hill.com/a-faster-weighted-random-choice
@@ -53,7 +55,7 @@ class CityTile
   constructor()
   {
     this.neighbours=[null,null,null,null]; //Holds referecnes to the tiles connected up,right,down and left to this tile.
-    this.roadConnections=[false,false,false,false]; //Holds which neighbours are connected to this one if this tile is a road piece.
+    this.roadConnections=[0,0,0,0]; //Holds which neighbours are connected to this one if this tile is a road piece.
     this.tileType=-1; //A negative value means that the tile has not been assigned a type yet.
     this.position=null;
   }
@@ -65,9 +67,9 @@ class CityTile
     {
       if(this.neighbours[i]===otherTile)
       {
-        if(this.roadConnections[i]==false) //If the other tile has not been connected to this one on this side yet.
+        if(this.roadConnections[i]==0) //If the other tile has not been connected to this one on this side yet.
         {
-          this.roadConnections[i]=true;
+          this.roadConnections[i]=1;
           otherTile.joinRoadTile(this); //A connection is attempted on the other side.
         }
 
@@ -86,7 +88,7 @@ class CityTile
     
     for(let i of this.neighbours)
     {
-      if((i.tileType!=-1)&&(i.roadConnections!="false,false,false,false")) //If this neighbouring tile is a road tile.
+      if((i.tileType!=-1)&&(i.roadConnections.toString()!="0,0,0,0")) //If this neighbouring tile is a road tile.
       {
         return true;
       }
@@ -240,49 +242,49 @@ function determineRoadTiles()
       var isRoadTile=true;
       switch(ctXY.roadConnections.toString())
       {
-        case "false,true,false,true": //Horizontal straight.
+        case "0,1,0,1": //Horizontal straight.
           addRoadStraight(ctXY.position,0);
           break;
-        case "true,false,true,false": //Vertical straight.
+        case "1,0,1,0": //Vertical straight.
           addRoadStraight(ctXY.position,1);
           break;
-        case "true,false,false,true": //Left-up turn.
+        case "1,0,0,1": //Left-up turn.
           addRoadCurve(ctXY.position,0);
           break;
-        case "true,true,false,false": //Right-up turn.
+        case "1,1,0,0": //Right-up turn.
           addRoadCurve(ctXY.position,3);
           break;
-        case "false,false,true,true": //Left-down turn.
+        case "0,0,1,1": //Left-down turn.
           addRoadCurve(ctXY.position,1);
           break;
-        case "false,true,true,false": //Right-down turn.
+        case "0,1,1,0": //Right-down turn.
           addRoadCurve(ctXY.position,2);
           break;
-        case "true,true,false,true": //Horizontal-up t-intersection.
+        case "1,1,0,1": //Horizontal-up t-intersection.
           addRoadT(ctXY.position,0);
           break;
-        case "false,true,true,true": //Horizontal-down t intersection.
+        case "0,1,1,1": //Horizontal-down t intersection.
           addRoadT(ctXY.position,2);
           break;
-        case "true,false,true,true": //Vertical-left t intersection.
+        case "1,0,1,1": //Vertical-left t intersection.
           addRoadT(ctXY.position,1);
           break;
-        case "true,true,true,false": //Vertical-right t-intersection.
+        case "1,1,1,0": //Vertical-right t-intersection.
           addRoadT(ctXY.position,3);
           break;
-        case "true,true,true,true": //Cross intersection.
+        case "1,1,1,1": //Cross intersection.
           addRoadCross(ctXY.position);
           break; 
-        case "true,false,false,false": //Up dead end.
+        case "1,0,0,0": //Up dead end.
           addRoadEnd(ctXY.position,0);
           break;
-        case "false,true,false,false": //Right dead end.
+        case "0,1,0,0": //Right dead end.
           addRoadEnd(ctXY.position,3);
           break;
-        case "false,false,true,false": //Down dead end.
+        case "0,0,1,0": //Down dead end.
           addRoadEnd(ctXY.position,2);
           break;
-        case "false,false,false,true": //Left dead end.
+        case "0,0,0,1": //Left dead end.
           addRoadEnd(ctXY.position,1);
           break;
         default:
@@ -303,7 +305,7 @@ function determineBuildingTiles(largeBuildingChance,smallBuildingChance)
   {
     for(let ctXY of ctX)
     {
-      if((ctXY.tileType==-1)&&(ctXY.roadConnections.toString()=="false,false,false,false")) //If the current tile has not been assigned yet and if this tile cannot be a road tile.
+      if((ctXY.tileType==-1)&&(ctXY.roadConnections.toString()=="0,0,0,0")) //If the current tile has not been assigned yet and if this tile cannot be a road tile.
       {
         if((ctXY.canPlaceLargeBuilding())&&(random()<largeBuildingChance)) //If a large building can be placed here and the random choice to place a large building here has been successful.
         {
@@ -326,7 +328,7 @@ function determineBuildingTiles(largeBuildingChance,smallBuildingChance)
   {
     for(let ctXY of ctX)
     {
-      if((ctXY.tileType==-1)&&(ctXY.roadConnections.toString()=="false,false,false,false")) //If the current tile has not been assigned yet and if this tile cannot be a road tile.
+      if((ctXY.tileType==-1)&&(ctXY.roadConnections.toString()=="0,0,0,0")) //If the current tile has not been assigned yet and if this tile cannot be a road tile.
       {
         if((ctXY.canPlaceSmallBuilding())&&(random()<smallBuildingChance)) 
         {
@@ -360,6 +362,116 @@ function getCityCentre()
   return [cx,cy];
 }
 
+class SceneObject
+{
+  constructor(type,position,rotation,size,colour,material)
+  {
+    this.type=type;
+    this.position=createVector(position[0],position[1],position[2]);
+    this.rotation=rotation;
+    this.size=size;
+    this.colour=colour;
+    this.material=material;
+    this.addData();
+  }
+  
+  addData()
+  {
+    this.index=currentObjectIndex;
+    objectTypes.set(this.index,0,intToColourArray(this.type));
+    vec3ToTexture(objectPositions,[this.position.x,this.position.y,this.position.z],this.index);
+    vec3ToTexture(objectRotations,this.rotation,this.index);
+    vec3ToTexture(objectSizes,this.size,this.index);
+    vec3ToTexture(objectColours,this.colour,this.index);
+    objectMaterials.set(this.index,0,intToColourArray(this.material));
+    currentObjectIndex+=1;
+  }
+}
+
+class BvhNode //A spherical node in a ball-tree based bounding volume hierarchy.
+{
+  constructor(child1,child2=null)
+  {
+    this.paired=false;
+    this.index=currentBvhNodeIndex;
+    this.child1=child1;
+    
+    if(child2==null) //If this node is a leaf node.
+    {
+      this.position=child1.position;
+      this.radius=2.5*max(child1.size);
+      
+      bvhChild1.set(this.index,0,intToColourArray(9999+this.child1.index));
+      bvhChild2.set(this.index,0,intToColourArray(0));
+    }
+    else //This node will enclose the two non-leaf child nodes.
+    {
+      this.child2=child2;
+      this.position=p5.Vector.add(this.child1.position,this.child2.position);
+      this.position.div(2.0); //The enclosing node is centered exactly between the two child nodes.
+      
+      var halfSeperation=this.child1.position.dist(this.position);
+      this.radius=halfSeperation+max(this.child1.radius,this.child2.radius); //The new node is large enough to enclose both children.
+      
+      bvhChild1.set(this.index,0,intToColourArray(this.child1.index));
+      bvhChild2.set(this.index,0,intToColourArray(this.child2.index));
+    }
+     
+    vec3ToTexture(bvhCentres,[this.position.x,this.position.y,this.position.z],this.index);
+    bvhRadii.set(this.index,0,floatToColourArray(this.radius));
+    currentBvhNodeIndex+=1;
+  }
+}
+
+function buildBVH(objectList)
+{
+  currentNodesToPair=[];
+  for(let i of objectList) //Initally set to leaf nodes containing the scene objects.
+  {
+    currentNodesToPair.push(new BvhNode(i));
+  }
+  
+  while(currentNodesToPair.length>1) //While the root node has not been created. Loops through all levels in the highrarchy.
+  {
+    nodePairs=[];
+    for(let i of currentNodesToPair) //Determines the separation between every node pair.
+    {
+      for(let j of currentNodesToPair)
+      {
+        if(i!=j)
+        {
+          nodePairs.push([i,j,i.position.dist(j.position)]);
+        }
+      }
+    }   
+    nodePairs.sort((a,b)=>{return a[2]-b[2];}); //Sorts the node pairs in ascending order based on separation.
+    
+    var newCurrentNodesToPair=[];
+    for(let i of nodePairs)
+    {
+      var paired1=i[0].paired;
+      var paired2=i[1].paired;
+      if((!paired1)&&(!paired2)) //If both nodes have not been paired yet, they are enclosed by and made children of a new node.
+      {
+        newCurrentNodesToPair.push(new BvhNode(i[0],i[1]));
+        i[0].paired=true;
+        i[1].paired=true;
+      }
+    }
+    
+    for(let i of currentNodesToPair) //If currentNodesToPair has an odd number of nodes then one will be unpaired; it is added to be paired i the next level of the highrarchy.
+    {
+      if(i.paired==false)
+      {
+        newCurrentNodesToPair.push(i); 
+        break;
+      }
+    }
+    
+    currentNodesToPair=newCurrentNodesToPair;
+  }
+}
+
 
 
 //Converts a floating point number into a sequence of three bytes by converting it to base 256. 2000 is added to the input
@@ -369,6 +481,17 @@ function floatToColourArray(input)
   var remainingInput=(input+2000.0)*4096.0; //The input is shifted and scaled.
   var column3=floor(remainingInput/65536.0); //How many of remainingInput can fit in the 256^2 column.
   remainingInput=remainingInput%65536; //The amount left over that does not fit into the 256^2 column.
+  var column2=floor(remainingInput/256.0); 
+  remainingInput=remainingInput%256; 
+  var column1=floor(remainingInput); 
+  return [column1,column2,column3,255];
+}
+
+function intToColourArray(input)
+{
+  var remainingInput=input+8388608;
+  var column3=floor(remainingInput/65536.0);
+  remainingInput=remainingInput%65536;
   var column2=floor(remainingInput/256.0); 
   remainingInput=remainingInput%256; 
   var column1=floor(remainingInput); 
@@ -385,44 +508,38 @@ function vec3ToTexture(dataTexture,inputArray,iX)
 
 function addObject(type,position,rotation,size,colour,material)
 {
-  objectTypes.set(currentObjectIndex,0,floatToColourArray(type));
-  vec3ToTexture(objectPositions,position,currentObjectIndex);
-  vec3ToTexture(objectRotations,rotation,currentObjectIndex);
-  vec3ToTexture(objectSizes,size,currentObjectIndex);
-  vec3ToTexture(objectColours,colour,currentObjectIndex);
-  objectMaterials.set(currentObjectIndex,0,floatToColourArray(material));
-  currentObjectIndex+=1;
+  sceneObjects.push(new SceneObject(type,position,rotation,size,colour,material));
 }
 
 
 function addRoadStraight(position,direction)
 {
-  addObject(0,position,[0.0,0.0,HALF_PI*direction],[0.0,0.0,0.0],[0.4,0.4,0.4],0);
-  addObject(5,position,[0.0,0.0,HALF_PI*direction],[0.0,0.0,0.0],[0.78,0.78,0.78],0);
+  addObject(0,position,[0.0,0.0,HALF_PI*direction],[0.5,0.0,0.0],[0.4,0.4,0.4],0);
+  addObject(5,position,[0.0,0.0,HALF_PI*direction],[0.5,0.0,0.0],[0.78,0.78,0.78],0);
 }
 
 function addRoadCurve(position,direction)
 {
-  addObject(1,position,[0.0,0.0,HALF_PI*direction],[0.0,0.0,0.0],[0.4,0.4,0.4],0);
-  addObject(6,position,[0.0,0.0,HALF_PI*direction],[0.0,0.0,0.0],[0.78,0.78,0.78],0);
+  addObject(1,position,[0.0,0.0,HALF_PI*direction],[0.5,0.0,0.0],[0.4,0.4,0.4],0);
+  addObject(6,position,[0.0,0.0,HALF_PI*direction],[0.5,0.0,0.0],[0.78,0.78,0.78],0);
 }
 
 function addRoadT(position,direction)
 {
-  addObject(2,position,[0.0,0.0,HALF_PI*direction],[0.0,0.0,0.0],[0.4,0.4,0.4],0);
-  addObject(7,position,[0.0,0.0,HALF_PI*direction],[0.0,0.0,0.0],[0.78,0.78,0.78],0);
+  addObject(2,position,[0.0,0.0,HALF_PI*direction],[0.5,0.0,0.0],[0.4,0.4,0.4],0);
+  addObject(7,position,[0.0,0.0,HALF_PI*direction],[0.5,0.0,0.0],[0.78,0.78,0.78],0);
 }
 
 function addRoadCross(position)
 {
-  addObject(3,position,[0.0,0.0,0.0],[0.0,0.0,0.0],[0.4,0.4,0.4],0);
-  addObject(8,position,[0.0,0.0,0.0],[0.0,0.0,0.0],[0.78,0.78,0.78],0);
+  addObject(3,position,[0.0,0.0,0.0],[0.5,0.0,0.0],[0.4,0.4,0.4],0);
+  addObject(8,position,[0.0,0.0,0.0],[0.5,0.0,0.0],[0.78,0.78,0.78],0);
 }
 
 function addRoadEnd(position,direction)
 {
-  addObject(4,position,[0.0,0.0,HALF_PI*direction],[0.0,0.0,0.0],[0.4,0.4,0.4],0);
-  addObject(9,position,[0.0,0.0,HALF_PI*direction],[0.0,0.0,0.0],[0.78,0.78,0.78],0);
+  addObject(4,position,[0.0,0.0,HALF_PI*direction],[0.5,0.0,0.0],[0.4,0.4,0.4],0);
+  addObject(9,position,[0.0,0.0,HALF_PI*direction],[0.5,0.0,0.0],[0.78,0.78,0.78],0);
 }
 
 function randomColour()
@@ -493,6 +610,27 @@ function generateRenderRegionCoordinates()
 
 function preload()
 {
+  //The p5.js renderer context creation function is modified to use WEBGL2. Idea to do this is from https://discourse.processing.org/t/use-webgl2-in-p5js/33695.
+  p5.RendererGL.prototype._initContext = function() {
+  try {
+    this.drawingContext =
+      this.canvas.getContext('webgl2', this._pInst._glAttributes);
+    if (this.drawingContext === null) {
+      throw new Error('Error creating webgl context');
+    } else {
+      const gl = this.drawingContext;
+      gl.enable(gl.DEPTH_TEST);
+      gl.depthFunc(gl.LEQUAL);
+      gl.viewport(0, 0, gl.drawingBufferWidth, gl.drawingBufferHeight);
+      this._viewport = this.drawingContext.getParameter(
+        this.drawingContext.VIEWPORT
+      );
+    }
+  } catch (er) {
+    throw er;
+  }
+};
+
   renderingShader=loadShader("vertexShader.glsl","rendering.glsl");
 }
 
@@ -508,12 +646,17 @@ function setup()
   shuffle(renderRegionCoordinates,true); //Randomizes the order that regions on the screen are rendered.
   
   
-  objectTypes=createImage(1000,1);
-  objectPositions=createImage(1000,3);
-  objectRotations=createImage(1000,3);
-  objectSizes=createImage(1000,3);
-  objectColours=createImage(1000,3);
-  objectMaterials=createImage(1000,1);
+  objectTypes=createImage(4096,1);
+  objectPositions=createImage(4096,3);
+  objectRotations=createImage(4096,3);
+  objectSizes=createImage(4096,3);
+  objectColours=createImage(4096,3);
+  objectMaterials=createImage(4096,1);
+  
+  bvhCentres=createImage(4096,3);
+  bvhRadii=createImage(4096,1);
+  bvhChild1=createImage(4096,1);
+  bvhChild2=createImage(4096,1);
   
   objectTypes.loadPixels();
   objectPositions.loadPixels();
@@ -521,9 +664,14 @@ function setup()
   objectSizes.loadPixels();
   objectColours.loadPixels();
   objectMaterials.loadPixels();
+  
+  bvhCentres.loadPixels();
+  bvhRadii.loadPixels();
+  bvhChild1.loadPixels();
+  bvhChild2.loadPixels();
+  
   addObject(10,[0.0,0.0,0.0],[0.0,0.0,0.0],[0.0,0.0,0.0],randomColour(),0);
   
-
   
   cityTiles=createTileGrid(tileCount,tileCount);
   var roadBuilderRules=[rSr1,rBlock];
@@ -538,25 +686,36 @@ function setup()
   objectSizes.updatePixels();
   objectColours.updatePixels();
   objectMaterials.updatePixels();
+  
+  buildBVH(sceneObjects.slice(1)); //The object representing the ground is infinite in size and is not included in the BVH.
+  bvhCentres.updatePixels();
+  bvhRadii.updatePixels();
+  bvhChild1.updatePixels();
+  bvhChild2.updatePixels();
 
   cityCentre=getCityCentre();
   cameraLocation=[cityCentre[0]+150.0,cityCentre[1]-150.0,150.0];
   lightD=[random(-1.0,1.0),random(-1.0,1.0),random(0.1,1.0)];
-  repeatX=random(1.0)>0.5;
-  repeatY=random(1.0)>0.5;
 }
 
 
 function draw() 
 {  
+  if(timeNotStarted)
+  {
+    print("Start rendering");
+    timeStart=millis();
+    timeNotStarted=false;
+  }
   if(renderRegionIndex>renderRegionCoordinates.length-1)
   {
     noLoop(); //All regions of the image have been rendered.
+    var timeElapsed=millis()-timeStart;
+    print("Time elapsed: "+timeElapsed/1000.0);
     return;
   }
   
   currentScreen=canvas.get();
-  
   var currentRrc=renderRegionCoordinates[renderRegionIndex];
   shader(renderingShader);
   renderingShader.setUniform("resolution",[width,height]);
@@ -567,10 +726,6 @@ function draw()
   renderingShader.setUniform("cameraForward",[-1,1,-1]);
   renderingShader.setUniform("lightD",lightD);
   
-  renderingShader.setUniform("repeatLength",float(tileCount));
-  renderingShader.setUniform("repeatX",repeatX);
-  renderingShader.setUniform("repeatY",repeatY);
-  
   renderingShader.setUniform("objectCount",currentObjectIndex);
   renderingShader.setUniform("objectTypes",objectTypes);
   renderingShader.setUniform("objectPositions",objectPositions);
@@ -578,6 +733,12 @@ function draw()
   renderingShader.setUniform("objectSizes",objectSizes);
   renderingShader.setUniform("objectColours",objectColours);
   renderingShader.setUniform("objectMaterials",objectMaterials);
+  
+  renderingShader.setUniform("bvhNodeCount",currentBvhNodeIndex);
+  renderingShader.setUniform("bvhCentres",bvhCentres);
+  renderingShader.setUniform("bvhRadii",bvhRadii);
+  renderingShader.setUniform("bvhChild1",bvhChild1);
+  renderingShader.setUniform("bvhChild2",bvhChild2);
   
   rect(0,0,width,height);  
   
