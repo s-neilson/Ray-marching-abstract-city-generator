@@ -344,14 +344,13 @@ bool rayIntersectsBvhNode(vec3 rayO,vec3 rayD,int bvhNodeIndex)
 }
 
 
-float totalSdf(vec3 ray,vec3 rayD,out int closestObjectIndex)
+void exploreBvh(vec3 ray,vec3 rayD,out int[32] objectStack,out int objectStackPointer) //Gets the only objects in the scene that the ray could possibly hit. Only the SDFs of these obejcts are evaluated.
 {
   int nodeStack[32];
   int nodeStackPointer=-1;
-  int objectStack[32];
-  int objectStackPointer=-1;
 
   push(nodeStack,nodeStackPointer,bvhNodeCount-1); //The root node is added for exploration.
+  push(objectStack,objectStackPointer,0); //The ground's SDF is always calculated.
   
   //The BVH hierarchy is explored depth-first in order to exclude objects that the ray cannot possibly hit.
   while(nodeStackPointer!=-1)
@@ -374,11 +373,12 @@ float totalSdf(vec3 ray,vec3 rayD,out int closestObjectIndex)
       push(nodeStack,nodeStackPointer,child1Index);
       push(nodeStack,nodeStackPointer,child2Index);
     }
-  }
+  }  
+}
 
-
+float totalSdf(vec3 ray,int[32] objectStack,int objectStackPointer,out int closestObjectIndex)
+{
   float closestObjectDistance=9999.8;
-  push(objectStack,objectStackPointer,0); //The ground's SDF is always calculated.
   while(objectStackPointer!=-1) //Loops over all objects in the object stack to find the closest to the vector "ray".
   {
     int objectIndex=pop(objectStack,objectStackPointer);
@@ -414,7 +414,11 @@ vec3 marchRay(in vec3 rayO,vec3 rayD,out int hitObjectIndex,out float minimumHit
   hitObjectIndex=-1; //The default value of negative 1 means that the ray has either gone too far or taken too many iterations to march.
   minimumHitAngle=1.0/SOFT_SHADOW_FACTOR; //This is an estimation of the smallest angle between the marching ray and an object. Used for soft shadows to simulate a non-point light source.
   vec3 ray=rayO;
-
+  
+  int objectStack[32];
+  int objectStackPointer=-1;
+  exploreBvh(ray,rayD,objectStack,objectStackPointer);
+  
   for(int i=0;i>-1;i++)
   {
     float marchDistance=length(ray-rayO);
@@ -424,7 +428,7 @@ vec3 marchRay(in vec3 rayO,vec3 rayD,out int hitObjectIndex,out float minimumHit
     }
     
     int closestObjectIndex=0;
-    float closestDistance=totalSdf(ray,rayD,closestObjectIndex);
+    float closestDistance=totalSdf(ray,objectStack,objectStackPointer,closestObjectIndex);
     minimumHitAngle=min(minimumHitAngle,max(closestDistance,0.0)/(marchDistance+0.0001)); //Uses the small angle approximation tan(x)=x, assumes that the rayO-closest hit point vector is perpendicular to rayD.
 
     if(closestDistance<0.001) //If ray is within 0.001 if the closest object, it is considered to have hit it.
