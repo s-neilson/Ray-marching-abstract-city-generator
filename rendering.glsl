@@ -4,8 +4,9 @@ precision highp float;
 precision highp int;
 
 #define PI 3.14159
-#define SOFT_SHADOW_FACTOR 16.0
-#define MAXIMUM_REFLECTIONS 4
+#define SUN_RADIUS 20.0
+#define MAXIMUM_REFLECTIONS 3
+#define MAX_STACK_SIZE 14
 
 
 #define OBJ_ROADSTRAIGHT 0
@@ -30,26 +31,18 @@ precision highp int;
 #define MAT_REFLECT 1
 
 uniform vec2 resolution;
-uniform vec2 renderRegion1;
-uniform vec2 renderRegion2;
 uniform sampler2D currentScreen;
+uniform float frameNumber;
 uniform vec3 cameraLocation;
 uniform vec3 cameraForward;
 uniform vec3 lightD;
 
 uniform int objectCount;
-uniform sampler2D objectTypes;
-uniform sampler2D objectPositions;
-uniform sampler2D objectRotations;
-uniform sampler2D objectSizes;
-uniform sampler2D objectColours;
-uniform sampler2D objectMaterials;
+uniform sampler2D objectData;
 
 uniform int bvhNodeCount;
-uniform sampler2D bvhCentres;
-uniform sampler2D bvhRadii;
-uniform sampler2D bvhChild1;
-uniform sampler2D bvhChild2;
+uniform sampler2D bvhData;
+
 
 //All SDFs are centred at position 0,0,0.
 float sdfPlane(vec3 ray)
@@ -194,8 +187,28 @@ float sdfFootpathEnd(vec3 ray)
   return min(straightSdf,curvedSdf);
 }
 
+//A pseudorandom number between minValue and maxValue based on the value of the vector "p".
+float randomNumber(vec3 seed,float minValue,float maxValue)
+{
+  float random_0_1=fract(sin(dot(seed,vec3(157.0,-33.0,92.0)))*12000.0); //A random number between 0 and 1.
+  return (random_0_1*(maxValue-minValue))+minValue;
+}
 
+//A random vector within the cone defined by the unit vector "n" and angular radius of "angle".
+vec3 randomConeVector(vec3 seed,vec3 n,float angle)
+{
+  //Including the "n" vector these make the basis vectors for the random vector.
+  vec3 cBx=cross(n,vec3(0.796,0.239,-0.557));
+  vec3 cBy=cross(n,cBx);
 
+  //Uniformly randomly sampling on a cyclinder and projecting to a sphere is the same as uniform random sampling on the sphere.
+  float randomAngle=randomNumber(seed+1.0,0.0,2.0*PI); //A random angle around the vector "n".
+  float cCn=randomNumber(seed,cos(angle),1.0); //The "n" vector component. Vertical distance on the unit sphere above angles less than "angle".
+  float cCx=sqrt(1.0-(cCn*cCn))*sin(randomAngle);
+  float cCy=sqrt(1.0-(cCn*cCn))*cos(randomAngle);
+
+  return (n*cCn)+(cBx*cCx)+(cBy*cCy);
+}
 
 //Below a 3D rotation matrix is made from rotation angles in all three axes. From https://en.wikipedia.org/wiki/Rotation_matrix
 mat3 getRotationMatrix(vec3 angles)
@@ -226,31 +239,32 @@ int getIntFromTexture(sampler2D inputTexture,int iX,int iY)
   return int(floor(shiftedRawValue+0.5));
 }
 
-vec3 getVec3FromTexture(sampler2D inputTexture,int iX)
+vec3 getVec3FromTexture(sampler2D inputTexture,int iX,int iY)
 {
-  return vec3(getFloatFromTexture(inputTexture,iX,0),getFloatFromTexture(inputTexture,iX,1),getFloatFromTexture(inputTexture,iX,2));
+  return vec3(getFloatFromTexture(inputTexture,iX,iY),getFloatFromTexture(inputTexture,iX,iY+1),getFloatFromTexture(inputTexture,iX,iY+2));
 }
 
 
-void push(out int[32] stack,out int pointer,int value)
+void push(inout int[MAX_STACK_SIZE] stack,inout int pointer,int value)
 {
   pointer+=1;
   stack[pointer]=value;
 }
 
-int pop(out int[32] stack,out int pointer)
+int pop(inout int[MAX_STACK_SIZE] stack,inout int pointer)
 {
   pointer-=1;
   return stack[pointer+1];
 }
 
+
 //Gets the SDF of a particular object based on its index.
 float objectSdf(vec3 ray,int objectIndex)
 {
-  int currentObjectType=getIntFromTexture(objectTypes,objectIndex,0);
-  vec3 currentObjectPosition=getVec3FromTexture(objectPositions,objectIndex);
-  vec3 currentObjectSize=getVec3FromTexture(objectSizes,objectIndex);
-  vec3 currentObjectRotation=getVec3FromTexture(objectRotations,objectIndex);
+  int currentObjectType=getIntFromTexture(objectData,objectIndex,0);
+  vec3 currentObjectPosition=getVec3FromTexture(objectData,objectIndex,1);
+  vec3 currentObjectRotation=getVec3FromTexture(objectData,objectIndex,4);
+  vec3 currentObjectSize=getVec3FromTexture(objectData,objectIndex,7);
 
   vec3 transformedRay=ray-currentObjectPosition; //Shifts the ray to the objects frame of reference.
 
@@ -327,10 +341,11 @@ float objectSdf(vec3 ray,int objectIndex)
   }
 }
 
+
 bool rayIntersectsBvhNode(vec3 rayO,vec3 rayD,int bvhNodeIndex)
 {
-  vec3 bnC=getVec3FromTexture(bvhCentres,bvhNodeIndex);
-  float bnR=getFloatFromTexture(bvhRadii,bvhNodeIndex,0);
+  vec3 bnC=getVec3FromTexture(bvhData,bvhNodeIndex,0);
+  float bnR=getFloatFromTexture(bvhData,bvhNodeIndex,3);
   
   vec3 bn_ray=bnC-rayO;
   float bnRayDistance=distance(bnC,rayO);
@@ -344,39 +359,39 @@ bool rayIntersectsBvhNode(vec3 rayO,vec3 rayD,int bvhNodeIndex)
 }
 
 
-void exploreBvh(vec3 ray,vec3 rayD,out int[32] objectStack,out int objectStackPointer) //Gets the only objects in the scene that the ray could possibly hit. Only the SDFs of these obejcts are evaluated.
+void exploreBvh(vec3 ray,vec3 rayD,inout int[MAX_STACK_SIZE] objectStack,inout int objectStackPointer) //Gets the only objects in the scene that the ray could possibly hit. Only the SDFs of these objects are evaluated.
 {
-  int nodeStack[32];
-  int nodeStackPointer=-1;
 
-  push(nodeStack,nodeStackPointer,bvhNodeCount-1); //The root node is added for exploration.
+  int currentNodeIndex=bvhNodeCount-1; //The root node is added for exploration.
   push(objectStack,objectStackPointer,0); //The ground's SDF is always calculated.
   
   //The BVH hierarchy is explored depth-first in order to exclude objects that the ray cannot possibly hit.
-  while(nodeStackPointer!=-1)
+  while(currentNodeIndex!=-1)
   { 
-    int currentNodeIndex=pop(nodeStack,nodeStackPointer);
+    int nextNodeIndex=getIntFromTexture(bvhData,currentNodeIndex,4);
+    int skipNodeIndex=getIntFromTexture(bvhData,currentNodeIndex,5);
+    int leafObjectIndex=getIntFromTexture(bvhData,currentNodeIndex,6);
+
     if(!rayIntersectsBvhNode(ray,rayD,currentNodeIndex))
     {
-      continue; //The ray does not intersect this node, meaning that there are no objects below this node in the hierarchy that the ray can possibly hit.
+      currentNodeIndex=skipNodeIndex; //The ray does not intersect this node, meaning that there are no objects below this node in the hierarchy that the ray can possibly hit.
+      continue;
+    }
+    else
+    {
+      currentNodeIndex=nextNodeIndex; //The tree is traversed in the normal depth-first order.
     }
 
-    int child1Index=getIntFromTexture(bvhChild1,currentNodeIndex,0);
-    int child2Index=getIntFromTexture(bvhChild2,currentNodeIndex,0);
-
-    if(child1Index>=9999) //It is a leaf node with a renderable object inside.
+    if(leafObjectIndex!=-1) //The current node is a leaf node.
     {
-      push(objectStack,objectStackPointer,child1Index-9999);
-    }
-    else //The child BVH nodes are added for exploration.
-    {
-      push(nodeStack,nodeStackPointer,child1Index);
-      push(nodeStack,nodeStackPointer,child2Index);
+      push(objectStack,objectStackPointer,leafObjectIndex);
+      continue;
     }
   }  
 }
 
-float totalSdf(vec3 ray,int[32] objectStack,int objectStackPointer,out int closestObjectIndex)
+
+float totalSdf(vec3 ray,int[MAX_STACK_SIZE] objectStack,int objectStackPointer,out int closestObjectIndex)
 {
   float closestObjectDistance=9999.8;
   while(objectStackPointer!=-1) //Loops over all objects in the object stack to find the closest to the vector "ray".
@@ -409,13 +424,12 @@ vec3 calculateNormal(vec3 p,int hitObjectIndex)
 
 //Determines which object (if any) a ray begining at rayO with a direction of rayD will hit using
 //the ray marching algorithm.
-vec3 marchRay(in vec3 rayO,vec3 rayD,out int hitObjectIndex,out float minimumHitAngle)
+vec3 marchRay(in vec3 rayO,vec3 rayD,out int hitObjectIndex)
 {
   hitObjectIndex=-1; //The default value of negative 1 means that the ray has either gone too far or taken too many iterations to march.
-  minimumHitAngle=1.0/SOFT_SHADOW_FACTOR; //This is an estimation of the smallest angle between the marching ray and an object. Used for soft shadows to simulate a non-point light source.
   vec3 ray=rayO;
   
-  int objectStack[32];
+  int objectStack[MAX_STACK_SIZE];
   int objectStackPointer=-1;
   exploreBvh(ray,rayD,objectStack,objectStackPointer);
   
@@ -429,16 +443,14 @@ vec3 marchRay(in vec3 rayO,vec3 rayD,out int hitObjectIndex,out float minimumHit
     
     int closestObjectIndex=0;
     float closestDistance=totalSdf(ray,objectStack,objectStackPointer,closestObjectIndex);
-    minimumHitAngle=min(minimumHitAngle,max(closestDistance,0.0)/(marchDistance+0.0001)); //Uses the small angle approximation tan(x)=x, assumes that the rayO-closest hit point vector is perpendicular to rayD.
 
     if(closestDistance<0.001) //If ray is within 0.001 if the closest object, it is considered to have hit it.
     {
       hitObjectIndex=closestObjectIndex;
-      minimumHitAngle=0.0;
       break;
     }
  
-    ray+=(rayD*closestDistance*1.0); //As the closest object is closestDistance away, it is safe to extend the ray along by this amount to prevent the ray from ending up inside an object.
+    ray+=(rayD*closestDistance*0.99); //As the closest object is closestDistance away, it is safe to extend the ray along by this amount to prevent the ray from ending up inside an object.
   }
 
   return ray;
@@ -463,67 +475,64 @@ vec3 getCameraRay(vec2 screenFraction,float cameraScreenSize,out vec3 orthograph
 }
 
 
-vec3 lambertianReflectance(vec3 n,vec3 colour,float lightI)
-{
-  return colour*(dot(n,normalize(lightD))*lightI);
-}
-
 out vec4 fragColour;
 void main()
 {
   vec2 screenFraction=gl_FragCoord.xy/resolution.xy;
-  if((screenFraction.x<renderRegion1.x)||(screenFraction.x>renderRegion2.x)||(screenFraction.y<renderRegion1.y)||(screenFraction.y>renderRegion2.y)) //If the current pixel is outside the render region.
-  {
-    fragColour=texelFetch(currentScreen,ivec2(gl_FragCoord.x,resolution.y-gl_FragCoord.y),0); //Use the existing pre-rendered pixels.
-    return;
-  }
 
   vec3 rayO=cameraLocation;
-  getCameraRay(screenFraction,30.0,rayO); 
+  getCameraRay(screenFraction,15.0,rayO); 
   vec3 rayD=normalize(cameraForward);
   //float cameraScreenSize=tan((PI/2.0)/2.0);
   //vec3 rayD=getCameraRay(screenFraction,cameraScreenSize);
-  float lightI=0.7;
+  float sunI=0.75;
+  float skyI=0.1;
   
-  vec3 outputColour=vec3(0.0,0.0,0.0); //The output colour of this pixel. Is initally set to black; if too many reflections take place this will be the pixel colour.
+  vec3 accumulatedAttenuation=vec3(1.0); //Holds the light attenuation from the previous bounces in order to get the total contribution of the sun and sky reflecting off of the current object to the current pixel on the camera.
+  vec3 outputColour=vec3(0.0,0.0,0.0); //The output colour of this pixel. Is initally set to black.
   for(int ri=0;ri<MAXIMUM_REFLECTIONS;ri++) //Loops over multiple reflections if needed.
   {
     int hitObjectIndex=0;
-    float minimumHitAngle=0.0;
-    vec3 hitPosition=marchRay(rayO,rayD,hitObjectIndex,minimumHitAngle);
+    vec3 hitPosition=marchRay(rayO,rayD,hitObjectIndex);
     vec3 hitNormal=calculateNormal(hitPosition,hitObjectIndex);
 
-    if(hitObjectIndex==-1) //If the ray has gone very far or taken too long without hitting anything it is assumed to hit the sky.
-    {
-      outputColour=mix(vec3(0.31,0.59,1.0),vec3(0.0,0.4,1.0),rayD.z);
-      break;
-    }
-
     //The colour and material of the hit object is determined.
-    vec3 hitObjectColour=getVec3FromTexture(objectColours,hitObjectIndex); 
-    int hitObjectMaterial=getIntFromTexture(objectMaterials,hitObjectIndex,0);
+    vec3 hitObjectColour=getVec3FromTexture(objectData,hitObjectIndex,10); 
+    int hitObjectMaterial=getIntFromTexture(objectData,hitObjectIndex,13);
 
+
+    if(hitObjectIndex==-1) //If the ray does not hit anything, takes to many steps or has travelled too far it is assumed to hit the sky.
+    {
+      outputColour+=accumulatedAttenuation*(2.0*PI)*(mix(vec3(0.31,0.59,1.0),vec3(0.0,0.4,1.0),rayD.z)*skyI);
+      break;
+    } 
+    
+    rayO=hitPosition+(hitNormal*0.002); //Any new generated rays have their origin moved slightly above the hit location in the direction of the hit normal so they don't immediately collide with the object that was originally hit.
     
     if(hitObjectMaterial==MAT_DIFFUSE)
     {
-      outputColour=lambertianReflectance(hitNormal,hitObjectColour,lightI);
-      //Shadows are created by seeing if anything is blocking hitPosition in the direction of the light.
-      //The hit position is slightly moved outwards in the direction of the normal so the ray does not
-      //immediately collide with the object that was originally hit. To simulate an extended light source,
-      //the shadow strength is proportional to the smallest angle made between an object and the vector to
-      //the light source.
-      int unused=0;                
-      marchRay(hitPosition+(hitNormal*0.002),normalize(lightD),unused,minimumHitAngle);          
-      outputColour*=(SOFT_SHADOW_FACTOR*minimumHitAngle); //Colour is shadowed depending on the minimum hit angle and a factor that controls the softness of shadows.
-      break; //No more reflections need to be done.
+      float sunSolidAngle=2.0*PI*(1.0-cos(SUN_RADIUS));
+
+      
+      vec3 randomLightVector=randomConeVector(hitPosition+vec3(frameNumber),normalize(lightD),(SUN_RADIUS*PI)/180.0); //A direction to a random point in the sun's disk.
+      vec3 directAttenuationPerSa=(hitObjectColour/PI)*dot(hitNormal,randomLightVector); //Lambertian attenuation of the sun to the diffuse object of the current bounce.
+      int shadowHitIndex=0;                
+      marchRay(rayO,randomLightVector,shadowHitIndex);   
+      directAttenuationPerSa*=(shadowHitIndex!=-1)? 0.0:1.0; //The sun contributes nothing in this bounce if the path to it is blocked by an object.
+      
+      outputColour+=accumulatedAttenuation*sunSolidAngle*(directAttenuationPerSa*vec3(sunI)); //The contribution of the sun's light bouncing off this object is attenuated by the previous light bounces and then added to the total.
+      rayD=randomConeVector(hitPosition+(vec3(frameNumber)*0.9),hitNormal,PI/2.0); //A random direction within a hemisphere centred on the surface normal for the next bounce.
+      vec3 indirectAttenuationPerSa=(hitObjectColour/PI)*dot(hitNormal,rayD); //Lambertian attenuation of light from the next bounce to the current object.
+      accumulatedAttenuation*=indirectAttenuationPerSa*(2.0*PI-sunSolidAngle); //The current attenuation is modified th include the new bounce.
     }
     else //The material is reflective and the colour is will be the colours of what the reflection ray hits.
     {
       vec3 hitReflect=reflect(rayD,hitNormal);
-      rayO=hitPosition+(hitReflect*0.002); //The ray origin is moved to slightly outside the hit object in the direction of the reflection ray.
       rayD=hitReflect; //The ray direction is updated.
     }
   }
 
-  fragColour=vec4(outputColour,1.0);
+  vec3 previousColour=texelFetch(currentScreen,ivec2(gl_FragCoord.x,resolution.y-gl_FragCoord.y),0).rgb;
+  vec3 averagedColour=((previousColour*(frameNumber-1.0))+outputColour)/frameNumber; //Uses the recursive definition of averages to continuously average the frames together.
+  fragColour=vec4(averagedColour,1.0);
 }

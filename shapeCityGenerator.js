@@ -6,27 +6,20 @@ var smallBuildingChance=0.6;
 var rSr1=["ffo"];
 var rBlock=["llffffrrfo","llfflo","rrffro","rrffffll"];
 
-
 var renderingShader=null;
 var canvas=null;
 var currentScreen=null;
-
-var renderSquareSize=0.1;
-var renderRegionIndex=0;
-var renderRegionCoordinates=null;
+var frameNumber=1.0;
 
 var currentObjectIndex=0;
 var currentBvhNodeIndex=0;
 var sceneObjects=[];
 var cameraLocation;
 var lightD;
-var objectTypes,objectPositions,objectRotations,objectSizes,objectColours,objectMaterials;
 
-var bvhCentres,bvhRadii;
-var bvhChild1,bvhChild2;
+var objectData;
+var bvhData;
 
-var timeNotStarted=true;
-var timeStart;
 
 //Chooses a random item from a list given weights for all of them. Based on the "Linear Scan"
 //example from https://blog.bruce-hill.com/a-faster-weighted-random-choice
@@ -378,57 +371,130 @@ class SceneObject
   addData()
   {
     this.index=currentObjectIndex;
-    objectTypes.set(this.index,0,intToColourArray(this.type));
-    vec3ToTexture(objectPositions,[this.position.x,this.position.y,this.position.z],this.index);
-    vec3ToTexture(objectRotations,this.rotation,this.index);
-    vec3ToTexture(objectSizes,this.size,this.index);
-    vec3ToTexture(objectColours,this.colour,this.index);
-    objectMaterials.set(this.index,0,intToColourArray(this.material));
+    objectData.set(this.index,0,intToColourArray(this.type));
+    vec3ToTexture(this.index,1,objectData,[this.position.x,this.position.y,this.position.z]);
+    vec3ToTexture(this.index,4,objectData,this.rotation);
+    vec3ToTexture(this.index,7,objectData,this.size);
+    vec3ToTexture(this.index,10,objectData,this.colour);
+    objectData.set(this.index,13,intToColourArray(this.material));
     currentObjectIndex+=1;
   }
 }
 
+
 class BvhNode //A spherical node in a ball-tree based bounding volume hierarchy.
 {
-  constructor(child1,child2=null)
+  constructor(leftChild,rightChild,leafObject)
   {
     this.paired=false;
     this.index=currentBvhNodeIndex;
-    this.child1=child1;
+    this.parent=null;
+    this.leftChild=leftChild;
+    this.rightChild=rightChild;
+    this.leafObject=leafObject;
     
-    if(child2==null) //If this node is a leaf node.
+    if(leafObject==null) //If the object is not a leaf node and will enclose two child nodes.
     {
-      this.position=child1.position;
-      this.radius=2.5*max(child1.size);
+      this.leftChild.parent=this;
+      this.rightChild.parent=this;
       
-      bvhChild1.set(this.index,0,intToColourArray(9999+this.child1.index));
-      bvhChild2.set(this.index,0,intToColourArray(0));
-    }
-    else //This node will enclose the two non-leaf child nodes.
-    {
-      this.child2=child2;
-      this.position=p5.Vector.add(this.child1.position,this.child2.position);
+      this.position=p5.Vector.add(this.leftChild.position,this.rightChild.position);
       this.position.div(2.0); //The enclosing node is centered exactly between the two child nodes.
       
-      var halfSeperation=this.child1.position.dist(this.position);
-      this.radius=halfSeperation+max(this.child1.radius,this.child2.radius); //The new node is large enough to enclose both children.
-      
-      bvhChild1.set(this.index,0,intToColourArray(this.child1.index));
-      bvhChild2.set(this.index,0,intToColourArray(this.child2.index));
+      var halfSeperation=this.leftChild.position.dist(this.position);
+      this.radius=halfSeperation+max(this.leftChild.radius,this.rightChild.radius); //The new node is large enough to enclose both children.
     }
-     
-    vec3ToTexture(bvhCentres,[this.position.x,this.position.y,this.position.z],this.index);
-    bvhRadii.set(this.index,0,floatToColourArray(this.radius));
+    else //If this node is a leaf node.
+    {
+      this.position=leafObject.position;
+      this.radius=1.8*max(leafObject.size);
+    }
+    
+    
+    vec3ToTexture(this.index,0,bvhData,[this.position.x,this.position.y,this.position.z]);
+    bvhData.set(this.index,3,floatToColourArray(this.radius));
+    
+    var leftChildIndex=(this.leftChild==null) ? -1:this.leftChild.index;
+    var rightChildIndex=(this.rightChild==null) ? -1:this.rightChild.index;
+    bvhData.set(this.index,4,intToColourArray(leftChildIndex)); 
+    bvhData.set(this.index,5,intToColourArray(rightChildIndex));
+    
+    var leafObjectIndex=(this.leafObject==null) ? -1:this.leafObject.index;
+    bvhData.set(this.index,6,intToColourArray(leafObjectIndex));
+    
     currentBvhNodeIndex+=1;
+  }
+ 
+ 
+  nextNodeSkip() //Assuming a left-most depth-first search is used, returns the first unexplored node (by looking at the rightChild nodes) in the BVH tree that does not include any descendant of this node.
+  {
+    if(this.parent==null) //If this node is the root node then there are no more nodes to explore.
+    {
+      return null;
+    }
+    
+    if(this.parent.rightChild==this)
+    {
+      return this.parent.nextNodeSkip(); //Ancestor nodes should be searched for the first unexplored node if this is a rightChild node.
+    }
+    else //Returns the right sibling of a leftChild node.
+    {
+      return this.parent.rightChild;
+    }
+  }
+   
+  nextNodeNormal() //Gets the next node in a depth-first traversal of the BVH tree.
+  {
+    if(this.leafObject==null)
+    {
+      return this.leftChild; //Looks at left-most child nodes first.
+    }
+    else
+    {
+      return this.nextNodeSkip(); //Returns the sibling if this is a leftChild node or the first unexplored node if it is a rightChild node.
+    }
+  }
+  
+  //Determines the paths that the shader will need to take in order to traverse the BVH tree.
+  determineTraversalPaths()
+  {
+    this.nextNormal=this.nextNodeNormal();
+    this.nextSkip=this.nextNodeSkip();
+    
+    if(this.leafObject==null) //Recursively calls this function on the children if this is not a leaf node.
+    {
+      this.leftChild.determineTraversalPaths();
+      this.rightChild.determineTraversalPaths();
+    }
+  }
+  
+  writeToBvhTexture()
+  {
+    vec3ToTexture(this.index,0,bvhData,[this.position.x,this.position.y,this.position.z]);
+    bvhData.set(this.index,3,floatToColourArray(this.radius));
+    
+    var nextNormalIndex=(this.nextNormal==null) ? -1:this.nextNormal.index;
+    var nextSkipIndex=(this.nextSkip==null) ? -1:this.nextSkip.index;
+    bvhData.set(this.index,4,intToColourArray(nextNormalIndex)); 
+    bvhData.set(this.index,5,intToColourArray(nextSkipIndex));
+    
+    var leafObjectIndex=(this.leafObject==null) ? -1:this.leafObject.index;
+    bvhData.set(this.index,6,intToColourArray(leafObjectIndex));
+
+    if(this.leafObject==null)
+    {
+      this.leftChild.writeToBvhTexture();
+      this.rightChild.writeToBvhTexture();
+    }
   }
 }
 
 function buildBVH(objectList)
 {
-  currentNodesToPair=[];
+  var currentNodesToPair=[];
   for(let i of objectList) //Initally set to leaf nodes containing the scene objects.
   {
-    currentNodesToPair.push(new BvhNode(i));
+    currentNodesToPair.push(new BvhNode(null,null,i));
   }
   
   while(currentNodesToPair.length>1) //While the root node has not been created. Loops through all levels in the highrarchy.
@@ -453,7 +519,7 @@ function buildBVH(objectList)
       var paired2=i[1].paired;
       if((!paired1)&&(!paired2)) //If both nodes have not been paired yet, they are enclosed by and made children of a new node.
       {
-        newCurrentNodesToPair.push(new BvhNode(i[0],i[1]));
+        newCurrentNodesToPair.push(new BvhNode(i[0],i[1],null));
         i[0].paired=true;
         i[1].paired=true;
       }
@@ -470,6 +536,8 @@ function buildBVH(objectList)
     
     currentNodesToPair=newCurrentNodesToPair;
   }
+  
+  return currentNodesToPair[0]; //The root node.
 }
 
 
@@ -498,11 +566,11 @@ function intToColourArray(input)
   return [column1,column2,column3,255];
 }
 
-function vec3ToTexture(dataTexture,inputArray,iX)
+function vec3ToTexture(iX,iY,dataTexture,inputArray)
 {
-  dataTexture.set(iX,0,floatToColourArray(inputArray[0]));  
-  dataTexture.set(iX,1,floatToColourArray(inputArray[1]));
-  dataTexture.set(iX,2,floatToColourArray(inputArray[2]));
+  dataTexture.set(iX,iY,floatToColourArray(inputArray[0]));  
+  dataTexture.set(iX,iY+1,floatToColourArray(inputArray[1]));
+  dataTexture.set(iX,iY+2,floatToColourArray(inputArray[2]));
 }
 
 
@@ -588,26 +656,6 @@ function addBuilding(position,scale)
 }
 
 
-function generateRenderRegionCoordinates()
-{
-  var rrc=[];
-  
-  var rrX=0.0;
-  while(rrX<0.998)
-  {
-    for(let rrY=0.0;rrY<0.998;rrY+=renderSquareSize)
-    {
-      rrc.push([[rrX,rrY],[rrX+renderSquareSize,rrY+renderSquareSize]]);
-    }
-    
-    rrX+=renderSquareSize;
-  }
-  
-  return rrc;
-}
-
-
-
 function preload()
 {
   //The p5.js renderer context creation function is modified to use WEBGL2. Idea to do this is from https://discourse.processing.org/t/use-webgl2-in-p5js/33695.
@@ -637,41 +685,18 @@ function preload()
 
 function setup() 
 {
-  canvas=createCanvas(windowWidth,windowHeight,WEBGL);
-  pixelDensity(1);
-  currentScreen=createImage(width,height);
-  renderRegionCoordinates=generateRenderRegionCoordinates();
   //randomSeed(2);
+  //randomSeed(15);
   //randomSeed(64754226562);
-  shuffle(renderRegionCoordinates,true); //Randomizes the order that regions on the screen are rendered.
   
+  objectData=createImage(4096,14);  
+  bvhData=createImage(4096,7);
   
-  objectTypes=createImage(4096,1);
-  objectPositions=createImage(4096,3);
-  objectRotations=createImage(4096,3);
-  objectSizes=createImage(4096,3);
-  objectColours=createImage(4096,3);
-  objectMaterials=createImage(4096,1);
-  
-  bvhCentres=createImage(4096,3);
-  bvhRadii=createImage(4096,1);
-  bvhChild1=createImage(4096,1);
-  bvhChild2=createImage(4096,1);
-  
-  objectTypes.loadPixels();
-  objectPositions.loadPixels();
-  objectRotations.loadPixels();
-  objectSizes.loadPixels();
-  objectColours.loadPixels();
-  objectMaterials.loadPixels();
-  
-  bvhCentres.loadPixels();
-  bvhRadii.loadPixels();
-  bvhChild1.loadPixels();
-  bvhChild2.loadPixels();
+  objectData.loadPixels();  
+  bvhData.loadPixels();
+
   
   addObject(10,[0.0,0.0,0.0],[0.0,0.0,0.0],[0.0,0.0,0.0],randomColour(),0);
-  
   
   cityTiles=createTileGrid(tileCount,tileCount);
   var roadBuilderRules=[rSr1,rBlock];
@@ -680,67 +705,43 @@ function setup()
   determineRoadTiles();
   determineBuildingTiles(largeBuildingChance,smallBuildingChance);
   
-  objectTypes.updatePixels();
-  objectPositions.updatePixels();
-  objectRotations.updatePixels();
-  objectSizes.updatePixels();
-  objectColours.updatePixels();
-  objectMaterials.updatePixels();
+  objectData.updatePixels();
   
-  buildBVH(sceneObjects.slice(1)); //The object representing the ground is infinite in size and is not included in the BVH.
-  bvhCentres.updatePixels();
-  bvhRadii.updatePixels();
-  bvhChild1.updatePixels();
-  bvhChild2.updatePixels();
+  var rootNode=buildBVH(sceneObjects.slice(1)); //The object representing the ground is infinite in size and is not included in the BVH.
+  rootNode.determineTraversalPaths();
+  rootNode.writeToBvhTexture();
+  bvhData.updatePixels();
 
   cityCentre=getCityCentre();
   cameraLocation=[cityCentre[0]+150.0,cityCentre[1]-150.0,150.0];
-  lightD=[random(-1.0,1.0),random(-1.0,1.0),random(0.1,1.0)];
+  lightD=[random(-1.0,1.0),random(-1.0,1.0),random(0.1,1.0)]; 
+  
+  canvas=createCanvas(windowWidth,windowHeight,WEBGL);
+  pixelDensity(1);
+  currentScreen=createImage(width,height);
 }
 
 
 function draw() 
 {  
-  if(timeNotStarted)
-  {
-    print("Start rendering");
-    timeStart=millis();
-    timeNotStarted=false;
-  }
-  if(renderRegionIndex>renderRegionCoordinates.length-1)
-  {
-    noLoop(); //All regions of the image have been rendered.
-    var timeElapsed=millis()-timeStart;
-    print("Time elapsed: "+timeElapsed/1000.0);
-    return;
-  }
-  
   currentScreen=canvas.get();
-  var currentRrc=renderRegionCoordinates[renderRegionIndex];
   shader(renderingShader);
   renderingShader.setUniform("resolution",[width,height]);
-  renderingShader.setUniform("renderRegion1",currentRrc[0]);
-  renderingShader.setUniform("renderRegion2",currentRrc[1]);
   renderingShader.setUniform("currentScreen",currentScreen);
+  renderingShader.setUniform("frameNumber",frameNumber);
+  
   renderingShader.setUniform("cameraLocation",cameraLocation);
   renderingShader.setUniform("cameraForward",[-1,1,-1]);
   renderingShader.setUniform("lightD",lightD);
   
   renderingShader.setUniform("objectCount",currentObjectIndex);
-  renderingShader.setUniform("objectTypes",objectTypes);
-  renderingShader.setUniform("objectPositions",objectPositions);
-  renderingShader.setUniform("objectRotations",objectRotations);
-  renderingShader.setUniform("objectSizes",objectSizes);
-  renderingShader.setUniform("objectColours",objectColours);
-  renderingShader.setUniform("objectMaterials",objectMaterials);
+  renderingShader.setUniform("objectData",objectData);
   
   renderingShader.setUniform("bvhNodeCount",currentBvhNodeIndex);
-  renderingShader.setUniform("bvhCentres",bvhCentres);
-  renderingShader.setUniform("bvhRadii",bvhRadii);
-  renderingShader.setUniform("bvhChild1",bvhChild1);
-  renderingShader.setUniform("bvhChild2",bvhChild2);
+  renderingShader.setUniform("bvhData",bvhData);
+
   
   rect(0,0,width,height);  
   
-  renderRegionIndex+=1;
+  frameNumber+=1.0;
 }
