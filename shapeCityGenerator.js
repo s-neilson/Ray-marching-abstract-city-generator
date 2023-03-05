@@ -718,13 +718,13 @@ function setup()
   
   canvas=createCanvas(windowWidth,windowHeight,WEBGL);
   pixelDensity(1);
-  currentScreen=createImage(width,height);
+  currentScreen=createGraphics(width,height,WEBGL);
 }
 
 
 function draw() 
 {  
-  currentScreen=canvas.get();
+  currentScreen.image(canvas,(-0.5)*width,(-0.5)*height);
   shader(renderingShader);
   renderingShader.setUniform("resolution",[width,height]);
   renderingShader.setUniform("currentScreen",currentScreen);
