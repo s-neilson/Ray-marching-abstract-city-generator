@@ -63,7 +63,7 @@ class CityTile
       {
         if(this.roadConnections & i2) //If the other tile has not been connected to this one on this side yet.
         {
-          this.roadConnections+i2;
+          this.roadConnections+=i2;
           otherTile.joinRoadTile(this); //A connection is attempted on the other side.
         }
 
