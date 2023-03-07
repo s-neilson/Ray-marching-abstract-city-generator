@@ -48,7 +48,7 @@ class CityTile
   constructor()
   {
     this.neighbours=[null,null,null,null]; //Holds referecnes to the tiles connected up,right,down and left to this tile.
-    this.roadConnections=[0,0,0,0]; //Holds which neighbours are connected to this one if this tile is a road piece.
+    this.roadConnections=0; //Holds which neighbours are connected to this one if this tile is a road piece. Each bit of the integer represents a connection to a neighbouring tile.
     this.tileType=-1; //A negative value means that the tile has not been assigned a type yet.
     this.position=null;
   }
@@ -56,13 +56,14 @@ class CityTile
   //Joins two tiles together as roads.
   joinRoadTile(otherTile)
   {
-    for(let i=0;i<4;i++)
+    for(let i=0;i<=3;i++)
     {
+      let i2=2**i
       if(this.neighbours[i]===otherTile)
       {
-        if(this.roadConnections[i]==0) //If the other tile has not been connected to this one on this side yet.
+        if(this.roadConnections & i2) //If the other tile has not been connected to this one on this side yet.
         {
-          this.roadConnections[i]=1;
+          this.roadConnections+i2;
           otherTile.joinRoadTile(this); //A connection is attempted on the other side.
         }
 
@@ -81,7 +82,7 @@ class CityTile
     
     for(let i of this.neighbours)
     {
-      if((i.tileType!=-1)&&(i.roadConnections.toString()!="0,0,0,0")) //If this neighbouring tile is a road tile.
+      if((i.tileType!=-1)&&(i.roadConnections!=0)) //If this neighbouring tile is a road tile.
       {
         return true;
       }
@@ -233,51 +234,51 @@ function determineRoadTiles()
     for(let ctXY of ctX)
     {
       var isRoadTile=true;
-      switch(ctXY.roadConnections.toString())
+      switch(ctXY.roadConnections)
       {
-        case "0,1,0,1": //Horizontal straight.
+        case 10: //Horizontal straight.
           addRoadStraight(ctXY.position,0);
           break;
-        case "1,0,1,0": //Vertical straight.
+        case 5: //Vertical straight.
           addRoadStraight(ctXY.position,1);
           break;
-        case "1,0,0,1": //Left-up turn.
+        case 9: //Left-up turn.
           addRoadCurve(ctXY.position,0);
           break;
-        case "1,1,0,0": //Right-up turn.
+        case 3: //Right-up turn.
           addRoadCurve(ctXY.position,3);
           break;
-        case "0,0,1,1": //Left-down turn.
+        case 12: //Left-down turn.
           addRoadCurve(ctXY.position,1);
           break;
-        case "0,1,1,0": //Right-down turn.
+        case 6: //Right-down turn.
           addRoadCurve(ctXY.position,2);
           break;
-        case "1,1,0,1": //Horizontal-up t-intersection.
+        case 11: //Horizontal-up t-intersection.
           addRoadT(ctXY.position,0);
           break;
-        case "0,1,1,1": //Horizontal-down t intersection.
+        case 14: //Horizontal-down t intersection.
           addRoadT(ctXY.position,2);
           break;
-        case "1,0,1,1": //Vertical-left t intersection.
+        case 13: //Vertical-left t intersection.
           addRoadT(ctXY.position,1);
           break;
-        case "1,1,1,0": //Vertical-right t-intersection.
+        case 7: //Vertical-right t-intersection.
           addRoadT(ctXY.position,3);
           break;
-        case "1,1,1,1": //Cross intersection.
+        case 15: //Cross intersection.
           addRoadCross(ctXY.position);
           break; 
-        case "1,0,0,0": //Up dead end.
+        case 1: //Up dead end.
           addRoadEnd(ctXY.position,0);
           break;
-        case "0,1,0,0": //Right dead end.
+        case 2: //Right dead end.
           addRoadEnd(ctXY.position,3);
           break;
-        case "0,0,1,0": //Down dead end.
+        case 4: //Down dead end.
           addRoadEnd(ctXY.position,2);
           break;
-        case "0,0,0,1": //Left dead end.
+        case 8: //Left dead end.
           addRoadEnd(ctXY.position,1);
           break;
         default:
@@ -298,7 +299,7 @@ function determineBuildingTiles(largeBuildingChance,smallBuildingChance)
   {
     for(let ctXY of ctX)
     {
-      if((ctXY.tileType==-1)&&(ctXY.roadConnections.toString()=="0,0,0,0")) //If the current tile has not been assigned yet and if this tile cannot be a road tile.
+      if((ctXY.tileType==-1)&&(ctXY.roadConnections==0)) //If the current tile has not been assigned yet and if this tile cannot be a road tile.
       {
         if((ctXY.canPlaceLargeBuilding())&&(random()<largeBuildingChance)) //If a large building can be placed here and the random choice to place a large building here has been successful.
         {
@@ -321,7 +322,7 @@ function determineBuildingTiles(largeBuildingChance,smallBuildingChance)
   {
     for(let ctXY of ctX)
     {
-      if((ctXY.tileType==-1)&&(ctXY.roadConnections.toString()=="0,0,0,0")) //If the current tile has not been assigned yet and if this tile cannot be a road tile.
+      if((ctXY.tileType==-1)&&(ctXY.roadConnections==0)) //If the current tile has not been assigned yet and if this tile cannot be a road tile.
       {
         if((ctXY.canPlaceSmallBuilding())&&(random()<smallBuildingChance)) 
         {
