@@ -58,10 +58,10 @@ class CityTile
   {
     for(let i=0;i<=3;i++)
     {
-      let i2=2**i
+      let i2=2**i;
       if(this.neighbours[i]===otherTile)
       {
-        if(this.roadConnections & i2) //If the other tile has not been connected to this one on this side yet.
+        if(!(this.roadConnections & i2)) //If the other tile has not been connected to this one on this side yet.
         {
           this.roadConnections+=i2;
           otherTile.joinRoadTile(this); //A connection is attempted on the other side.
