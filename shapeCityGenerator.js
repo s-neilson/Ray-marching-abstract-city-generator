@@ -49,7 +49,7 @@ class CityTile
   {
     this.neighbours=[null,null,null,null]; //Holds referecnes to the tiles connected up,right,down and left to this tile.
     this.roadConnections=0; //Holds which neighbours are connected to this one if this tile is a road piece. Each bit of the integer represents a connection to a neighbouring tile.
-    this.tileType=-1; //A negative value means that the tile has not been assigned a type yet.
+    this.tileType=0; //A zero value means that the tile has not been assigned a type yet.
     this.position=null;
   }
   
@@ -75,14 +75,14 @@ class CityTile
   //Determines is a small building can be placed on this tile. This is if at least one of the four neighbouring tiles is a road tile and if this tile is currently free.
   canPlaceSmallBuilding()
   {
-    if(this.tileType!=-1) //If the current tile already has a type.
+    if(this.tileType) //If the current tile already has a type.
     {
       return false;
     }
     
     for(let i of this.neighbours)
     {
-      if((i.tileType!=-1)&&(i.roadConnections!=0)) //If this neighbouring tile is a road tile.
+      if(i.tileType&&(i.roadConnections!=0)) //If this neighbouring tile is a road tile.
       {
         return true;
       }
@@ -95,7 +95,7 @@ class CityTile
   //the building will be made from are free.
   canPlaceLargeBuilding()
   {
-    var squaresAreFree=(this.tileType==-1)&&(this.neighbours[0].tileType==-1)&&(this.neighbours[1].tileType==-1)&&(this.neighbours[0].neighbours[1].tileType==-1);
+    var squaresAreFree=!((this.tileType)||(this.neighbours[0].tileType)||(this.neighbours[1].tileType)||(this.neighbours[0].neighbours[1].tileType));
     var atLeastOneRoadSurrounds=(this.canPlaceSmallBuilding())||(this.neighbours[0].canPlaceSmallBuilding())||(this.neighbours[1].canPlaceSmallBuilding())||(this.neighbours[0].neighbours[1].canPlaceSmallBuilding());
     return squaresAreFree&&atLeastOneRoadSurrounds;
   }
@@ -233,7 +233,7 @@ function determineRoadTiles()
   {
     for(let ctXY of ctX)
     {
-      var isRoadTile=true;
+      ctXY.tileType=1;
       switch(ctXY.roadConnections)
       {
         case 10: //Horizontal straight.
@@ -282,10 +282,8 @@ function determineRoadTiles()
           addRoadEnd(ctXY.position,1);
           break;
         default:
-          isRoadTile=false;
+          ctXY.tileType=0;
       }
-           
-      ctXY.tileType=isRoadTile? 1:-1;
     }
   }
 }
@@ -299,7 +297,7 @@ function determineBuildingTiles(largeBuildingChance,smallBuildingChance)
   {
     for(let ctXY of ctX)
     {
-      if((ctXY.tileType==-1)&&(ctXY.roadConnections==0)) //If the current tile has not been assigned yet and if this tile cannot be a road tile.
+      if((ctXY.tileType==0)&&(ctXY.roadConnections==0)) //If the current tile has not been assigned yet and if this tile cannot be a road tile.
       {
         if((ctXY.canPlaceLargeBuilding())&&(random()<largeBuildingChance)) //If a large building can be placed here and the random choice to place a large building here has been successful.
         {
@@ -322,7 +320,7 @@ function determineBuildingTiles(largeBuildingChance,smallBuildingChance)
   {
     for(let ctXY of ctX)
     {
-      if((ctXY.tileType==-1)&&(ctXY.roadConnections==0)) //If the current tile has not been assigned yet and if this tile cannot be a road tile.
+      if((ctXY.tileType==0)&&(ctXY.roadConnections==0)) //If the current tile has not been assigned yet and if this tile cannot be a road tile.
       {
         if((ctXY.canPlaceSmallBuilding())&&(random()<smallBuildingChance)) 
         {

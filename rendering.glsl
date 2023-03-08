@@ -43,6 +43,8 @@ uniform sampler2D objectData;
 uniform int bvhNodeCount;
 uniform sampler2D bvhData;
 
+int objectStack[MAX_STACK_SIZE];
+int objectStackPointer=-1;
 
 //All SDFs are centred at position 0,0,0.
 float sdfPlane(vec3 ray)
@@ -245,16 +247,13 @@ vec3 getVec3FromTexture(sampler2D inputTexture,int iX,int iY)
 }
 
 
-void push(inout int[MAX_STACK_SIZE] stack,inout int pointer,int value)
+void push(int value)
 {
-  pointer+=1;
-  stack[pointer]=value;
-}
-
-int pop(inout int[MAX_STACK_SIZE] stack,inout int pointer)
-{
-  pointer-=1;
-  return stack[pointer+1];
+  if(objectStackPointer<=(MAX_STACK_SIZE-1)) //Prevents the stack from overflowing.
+  {
+    objectStackPointer+=1;
+    objectStack[objectStackPointer]=value;
+  }
 }
 
 
@@ -359,11 +358,12 @@ bool rayIntersectsBvhNode(vec3 rayO,vec3 rayD,int bvhNodeIndex)
 }
 
 
-void exploreBvh(vec3 ray,vec3 rayD,inout int[MAX_STACK_SIZE] objectStack,inout int objectStackPointer) //Gets the only objects in the scene that the ray could possibly hit. Only the SDFs of these objects are evaluated.
+void exploreBvh(vec3 ray,vec3 rayD) //Gets the only objects in the scene that the ray could possibly hit. Only the SDFs of these objects are evaluated.
 {
 
   int currentNodeIndex=bvhNodeCount-1; //The root node is added for exploration.
-  push(objectStack,objectStackPointer,0); //The ground's SDF is always calculated.
+  //push(objectStack,objectStackPointer,0); //The ground's SDF is always calculated.
+  push(0); //The ground's SDF is always calculated.
   
   //The BVH hierarchy is explored depth-first in order to exclude objects that the ray cannot possibly hit.
   while(currentNodeIndex!=-1)
@@ -384,19 +384,21 @@ void exploreBvh(vec3 ray,vec3 rayD,inout int[MAX_STACK_SIZE] objectStack,inout i
 
     if(leafObjectIndex!=-1) //The current node is a leaf node.
     {
-      push(objectStack,objectStackPointer,leafObjectIndex);
+      //push(objectStack,objectStackPointer,leafObjectIndex);
+      push(leafObjectIndex);
       continue;
     }
   }  
 }
 
 
-float totalSdf(vec3 ray,int[MAX_STACK_SIZE] objectStack,int objectStackPointer,out int closestObjectIndex)
+float totalSdf(vec3 ray,out int closestObjectIndex)
 {
   float closestObjectDistance=9999.8;
-  while(objectStackPointer!=-1) //Loops over all objects in the object stack to find the closest to the vector "ray".
+
+  for(int i=objectStackPointer;i>=0;i--) //Loops over all objects in the object stack to find the closest to the vector "ray".
   {
-    int objectIndex=pop(objectStack,objectStackPointer);
+    int objectIndex=objectStack[i];
     float currentObjectDistance=objectSdf(ray,objectIndex);
 
     if(currentObjectDistance<closestObjectDistance) //If the current object is now the closest found so far.
@@ -429,9 +431,8 @@ vec3 marchRay(in vec3 rayO,vec3 rayD,out int hitObjectIndex)
   hitObjectIndex=-1; //The default value of negative 1 means that the ray has either gone too far or taken too many iterations to march.
   vec3 ray=rayO;
   
-  int objectStack[MAX_STACK_SIZE];
-  int objectStackPointer=-1;
-  exploreBvh(ray,rayD,objectStack,objectStackPointer);
+  objectStackPointer=-1;
+  exploreBvh(ray,rayD);
   
   for(int i=0;i>-1;i++)
   {
@@ -442,7 +443,7 @@ vec3 marchRay(in vec3 rayO,vec3 rayD,out int hitObjectIndex)
     }
     
     int closestObjectIndex=0;
-    float closestDistance=totalSdf(ray,objectStack,objectStackPointer,closestObjectIndex);
+    float closestDistance=totalSdf(ray,closestObjectIndex);
 
     if(closestDistance<0.001) //If ray is within 0.001 if the closest object, it is considered to have hit it.
     {
