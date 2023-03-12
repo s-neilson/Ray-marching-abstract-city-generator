@@ -47,7 +47,7 @@ class CityTile
 {
   constructor()
   {
-    this.neighbours=[null,null,null,null]; //Holds referecnes to the tiles connected up,right,down and left to this tile.
+    this.neighbours=[null,null,null,null]; //Holds references to the tiles connected up,right,down and left to this tile.
     this.roadConnections=0; //Holds which neighbours are connected to this one if this tile is a road piece. Each bit of the integer represents a connection to a neighbouring tile.
     this.tileType=0; //A zero value means that the tile has not been assigned a type yet.
     this.position=null;
@@ -82,7 +82,7 @@ class CityTile
     
     for(let i of this.neighbours)
     {
-      if(i.tileType&&(i.roadConnections!=0)) //If this neighbouring tile is a road tile.
+      if(i.roadConnections) //If this neighbouring tile is a road tile.
       {
         return true;
       }
@@ -168,7 +168,7 @@ class RoadBuilder
 function generateRoadLayout(numberOfIterations,ruleWeights,rules)
 {
   var currentNumberOfIterations=0;
-  var initialRoadBuilder=new RoadBuilder(cityTiles[floor(random(0,tileCount))][floor(random(0,tileCount))],floor(random(0,4))); //The first road builder is placed in the middle of the city tile grid.
+  var initialRoadBuilder=new RoadBuilder(cityTiles[floor(tileCount/2.0)][floor(tileCount/2.0)],floor(random(0,4))); //The first road builder is placed in the middle of the city tile grid.
   var roadBuilders=[initialRoadBuilder]; //The list of active RoadBuilders on the city tile grid.
 
   while(currentNumberOfIterations<numberOfIterations)
@@ -297,7 +297,7 @@ function determineBuildingTiles(largeBuildingChance,smallBuildingChance)
   {
     for(let ctXY of ctX)
     {
-      if((ctXY.tileType==0)&&(ctXY.roadConnections==0)) //If the current tile has not been assigned yet and if this tile cannot be a road tile.
+      if(!(ctXY.tileType)) //If the current tile has not been assigned yet.
       {
         if((ctXY.canPlaceLargeBuilding())&&(random()<largeBuildingChance)) //If a large building can be placed here and the random choice to place a large building here has been successful.
         {
@@ -320,7 +320,7 @@ function determineBuildingTiles(largeBuildingChance,smallBuildingChance)
   {
     for(let ctXY of ctX)
     {
-      if((ctXY.tileType==0)&&(ctXY.roadConnections==0)) //If the current tile has not been assigned yet and if this tile cannot be a road tile.
+      if(!(ctXY.tileType)) //If the current tile has not been assigned yet.
       {
         if((ctXY.canPlaceSmallBuilding())&&(random()<smallBuildingChance)) 
         {
@@ -359,7 +359,7 @@ class SceneObject
   constructor(type,position,rotation,size,colour,material)
   {
     this.type=type;
-    this.position=createVector(position[0],position[1],position[2]);
+    this.position=createVector(...position);
     this.rotation=rotation;
     this.size=size;
     this.colour=colour;
@@ -392,7 +392,13 @@ class BvhNode //A spherical node in a ball-tree based bounding volume hierarchy.
     this.rightChild=rightChild;
     this.leafObject=leafObject;
     
-    if(leafObject==null) //If the object is not a leaf node and will enclose two child nodes.
+
+    if(leafObject) //If this node is a leaf node.
+    {
+      this.position=leafObject.position;
+      this.radius=1.8*max(leafObject.size);
+    }
+    else //If the object is not a leaf node and will enclose two child nodes.
     {
       this.leftChild.parent=this;
       this.rightChild.parent=this;
@@ -403,22 +409,17 @@ class BvhNode //A spherical node in a ball-tree based bounding volume hierarchy.
       var halfSeperation=this.leftChild.position.dist(this.position);
       this.radius=halfSeperation+max(this.leftChild.radius,this.rightChild.radius); //The new node is large enough to enclose both children.
     }
-    else //If this node is a leaf node.
-    {
-      this.position=leafObject.position;
-      this.radius=1.8*max(leafObject.size);
-    }
     
     
     vec3ToTexture(this.index,0,bvhData,[this.position.x,this.position.y,this.position.z]);
     bvhData.set(this.index,3,floatToColourArray(this.radius));
     
-    var leftChildIndex=(this.leftChild==null) ? -1:this.leftChild.index;
-    var rightChildIndex=(this.rightChild==null) ? -1:this.rightChild.index;
+    var leftChildIndex=(this.leftChild) ? this.leftChild.index:-1;
+    var rightChildIndex=(this.rightChild) ? this.rightChild.index:-1;
     bvhData.set(this.index,4,intToColourArray(leftChildIndex)); 
     bvhData.set(this.index,5,intToColourArray(rightChildIndex));
     
-    var leafObjectIndex=(this.leafObject==null) ? -1:this.leafObject.index;
+    var leafObjectIndex=(this.leafObject) ? this.leafObject.index:-1;
     bvhData.set(this.index,6,intToColourArray(leafObjectIndex));
     
     currentBvhNodeIndex+=1;
@@ -427,7 +428,7 @@ class BvhNode //A spherical node in a ball-tree based bounding volume hierarchy.
  
   nextNodeSkip() //Assuming a left-most depth-first search is used, returns the first unexplored node (by looking at the rightChild nodes) in the BVH tree that does not include any descendant of this node.
   {
-    if(this.parent==null) //If this node is the root node then there are no more nodes to explore.
+    if(!(this.parent)) //If this node is the root node then there are no more nodes to explore.
     {
       return null;
     }
@@ -444,13 +445,13 @@ class BvhNode //A spherical node in a ball-tree based bounding volume hierarchy.
    
   nextNodeNormal() //Gets the next node in a depth-first traversal of the BVH tree.
   {
-    if(this.leafObject==null)
+    if(this.leafObject)
     {
-      return this.leftChild; //Looks at left-most child nodes first.
+      return this.nextNodeSkip(); //Returns the sibling if this is a leftChild node or the first unexplored node if it is a rightChild node.
     }
     else
     {
-      return this.nextNodeSkip(); //Returns the sibling if this is a leftChild node or the first unexplored node if it is a rightChild node.
+      return this.leftChild; //Looks at left-most child nodes first.
     }
   }
   
@@ -460,7 +461,7 @@ class BvhNode //A spherical node in a ball-tree based bounding volume hierarchy.
     this.nextNormal=this.nextNodeNormal();
     this.nextSkip=this.nextNodeSkip();
     
-    if(this.leafObject==null) //Recursively calls this function on the children if this is not a leaf node.
+    if(!(this.leafObject)) //Recursively calls this function on the children if this is not a leaf node.
     {
       this.leftChild.determineTraversalPaths();
       this.rightChild.determineTraversalPaths();
@@ -472,15 +473,15 @@ class BvhNode //A spherical node in a ball-tree based bounding volume hierarchy.
     vec3ToTexture(this.index,0,bvhData,[this.position.x,this.position.y,this.position.z]);
     bvhData.set(this.index,3,floatToColourArray(this.radius));
     
-    var nextNormalIndex=(this.nextNormal==null) ? -1:this.nextNormal.index;
-    var nextSkipIndex=(this.nextSkip==null) ? -1:this.nextSkip.index;
+    var nextNormalIndex=(this.nextNormal) ? this.nextNormal.index:-1;
+    var nextSkipIndex=(this.nextSkip) ? this.nextSkip.index:-1;
     bvhData.set(this.index,4,intToColourArray(nextNormalIndex)); 
     bvhData.set(this.index,5,intToColourArray(nextSkipIndex));
     
-    var leafObjectIndex=(this.leafObject==null) ? -1:this.leafObject.index;
+    var leafObjectIndex=(this.leafObject) ? this.leafObject.index:-1;
     bvhData.set(this.index,6,intToColourArray(leafObjectIndex));
 
-    if(this.leafObject==null)
+    if(!(this.leafObject))
     {
       this.leftChild.writeToBvhTexture();
       this.rightChild.writeToBvhTexture();
@@ -526,7 +527,7 @@ function buildBVH(objectList)
     
     for(let i of currentNodesToPair) //If currentNodesToPair has an odd number of nodes then one will be unpaired; it is added to be paired i the next level of the highrarchy.
     {
-      if(i.paired==false)
+      if(!(i.paired))
       {
         newCurrentNodesToPair.push(i); 
         break;
@@ -683,11 +684,7 @@ function preload()
 
 
 function setup() 
-{
-  //randomSeed(2);
-  //randomSeed(15);
-  //randomSeed(64754226562);
-  
+{ 
   objectData=createImage(4096,14);  
   bvhData=createImage(4096,7);
   

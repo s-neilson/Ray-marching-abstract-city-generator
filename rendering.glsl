@@ -83,7 +83,7 @@ float sdfBox(vec3 ray,vec3 size)
 {
   vec3 mirroredRay=abs(ray); //This mirrors the below SDF across all three dimensions, as it defines a box spanned by positions 0,0,0 to "size". The mirroring makes it symmetrical in all planes with dimensions of size*2.
   vec3 faceDistances=mirroredRay-size; //Distances to infinite planes in the XY,XZ and YZ planes.
-  vec3 externalFaceDistances=max(faceDistances,vec3(0.0,0.0,0.0)); //The external face distances are set to zero if the ray is on the inside region of the plane. 
+  vec3 externalFaceDistances=max(faceDistances,vec3(0.0)); //The external face distances are set to zero if the ray is on the inside region of the plane. 
   float closestInternalFaceDistance=min(max(max(faceDistances.x,faceDistances.y),faceDistances.z),0.0); //The distance to the closest face if "ray" is inside the box. This distance is negative on the inside of the box, if the ray is outside of the box its value is set to zero.
   
   return length(externalFaceDistances)+closestInternalFaceDistance; //If two face distances are inside this gives the distance to one of the box's face, one face distance inside gives the distance to one of the box's edges and no face distances inside gives the distance to one of the box's corners. It gives the distance (negative) to the closest face if the ray is inside the box. 
@@ -98,7 +98,7 @@ float sdfAnnulus(vec3 ray,float r,float t,float h)
 
 float sdfOctahedron(vec3 ray,float r)
 {
-  return dot(normalize(vec3(1.0,1.0,1.0)),abs(ray)-vec3(r,0.0,0.0));
+  return dot(normalize(vec3(1.0)),abs(ray)-vec3(r,0.0,0.0));
 }
 
 float sdfTetrahedron(vec3 ray,float r)
@@ -215,13 +215,9 @@ vec3 randomConeVector(vec3 seed,vec3 n,float angle)
 //Below a 3D rotation matrix is made from rotation angles in all three axes. From https://en.wikipedia.org/wiki/Rotation_matrix
 mat3 getRotationMatrix(vec3 angles)
 {
-  float Cx=cos(angles.x);
-  float Cy=cos(angles.y);
-  float Cz=cos(angles.z);
-  float Sx=sin(angles.x);
-  float Sy=sin(angles.y);
-  float Sz=sin(angles.z);
-  return mat3(Cz*Cy,(Cz*Sy*Sx)-(Sz*Cx),(Cz*Sy*Cx)+(Sz*Sx),Sz*Cy,(Sz*Sy*Sx)+(Cz*Cx),(Sz*Sy*Cx)-(Cz*Sx),(-1.0)*Sy,Cy*Sx,Cy*Cx);
+  vec3 C=cos(angles);
+  vec3 S=sin(angles);
+  return mat3(C.z*C.y,(C.z*S.y*S.x)-(S.z*C.x),(C.z*S.y*C.x)+(S.z*S.x),S.z*C.y,(S.z*S.y*S.x)+(C.z*C.x),(S.z*S.y*C.x)-(C.z*S.x),(-1.0)*S.y,C.y*S.x,C.y*C.x);
 }
 
 float getRawPackedFromTexture(sampler2D inputTexture,int iX,int iY)
@@ -270,73 +266,42 @@ float objectSdf(vec3 ray,int objectIndex)
   transformedRay=getRotationMatrix(currentObjectRotation)*(transformedRay); //Rotates the ray in the object's frame of reference.
   float currentObjectDistance=9999.9;
 
-  if(currentObjectType==OBJ_PLANE)
+  switch(currentObjectType)
   {
-    return sdfPlane(transformedRay);    
-  }
-  else if(currentObjectType==OBJ_ROADSTRAIGHT)
-  {
-    return sdfRoadStraight(transformedRay);
-  }  
-  else if(currentObjectType==OBJ_ROADCURVE)
-  {
-    return sdfRoadCurve(transformedRay);
-  } 
-  else if(currentObjectType==OBJ_ROADT)
-  {
-    return sdfRoadT(transformedRay);
-  }  
-  else if(currentObjectType==OBJ_ROADCROSS)
-  {
-    return sdfRoadCross(transformedRay);
-  }  
-  else if(currentObjectType==OBJ_ROADEND)
-  {
-    return sdfRoadEnd(transformedRay);
-  }
-  else if(currentObjectType==OBJ_FOOTPATHSTRAIGHT)
-  {
-    return sdfFootpathStraight(transformedRay);
-  } 
-  else if(currentObjectType==OBJ_FOOTPATHCURVE)
-  {
-    return sdfFootpathCurve(transformedRay);
-  }
-  else if(currentObjectType==OBJ_FOOTPATHT)
-  {
-    return sdfFootpathT(transformedRay);
-  }
-  else if(currentObjectType==OBJ_FOOTPATHCROSS)
-  {
-    return sdfFootpathCross(transformedRay);
-  }
-  else if(currentObjectType==OBJ_FOOTPATHEND)
-  {
-    return sdfFootpathEnd(transformedRay);
-  }
-  else if(currentObjectType==OBJ_SPHERE)
-  {
-    return sdfSphere(transformedRay,currentObjectSize[0]);
-  }
-  else if(currentObjectType==OBJ_BOX)
-  {
-    return sdfBox(transformedRay,currentObjectSize);
-  }
-  else if(currentObjectType==OBJ_TORUS)
-  {
-    return sdfTorus(transformedRay,currentObjectSize[0],currentObjectSize[1]);
-  }
-  else if(currentObjectType==OBJ_CONE)
-  {
-    return sdfCone(transformedRay,currentObjectSize[0],currentObjectSize[1]);
-  }
-  else if(currentObjectType==OBJ_OCTAHEDRON)
-  {
-    return sdfOctahedron(transformedRay,currentObjectSize[0]);
-  }
-  else if(currentObjectType==OBJ_TETRAHEDRON)
-  {
-    return sdfTetrahedron(transformedRay,currentObjectSize[0]);
+    case OBJ_PLANE:
+      return sdfPlane(transformedRay);    
+    case OBJ_ROADSTRAIGHT:
+      return sdfRoadStraight(transformedRay);
+    case OBJ_ROADCURVE:
+      return sdfRoadCurve(transformedRay);
+    case OBJ_ROADT:
+      return sdfRoadT(transformedRay);
+    case OBJ_ROADCROSS:
+      return sdfRoadCross(transformedRay);
+    case OBJ_ROADEND:
+      return sdfRoadEnd(transformedRay);
+    case OBJ_FOOTPATHSTRAIGHT:
+      return sdfFootpathStraight(transformedRay);
+    case OBJ_FOOTPATHCURVE:
+      return sdfFootpathCurve(transformedRay);
+    case OBJ_FOOTPATHT:
+      return sdfFootpathT(transformedRay);
+    case OBJ_FOOTPATHCROSS:
+      return sdfFootpathCross(transformedRay);
+    case OBJ_FOOTPATHEND:
+      return sdfFootpathEnd(transformedRay);
+    case OBJ_SPHERE:
+      return sdfSphere(transformedRay,currentObjectSize[0]);
+    case OBJ_BOX:
+      return sdfBox(transformedRay,currentObjectSize);
+    case OBJ_TORUS:
+      return sdfTorus(transformedRay,currentObjectSize[0],currentObjectSize[1]);
+    case OBJ_CONE:
+      return sdfCone(transformedRay,currentObjectSize[0],currentObjectSize[1]);
+    case OBJ_OCTAHEDRON:
+      return sdfOctahedron(transformedRay,currentObjectSize[0]);
+    case OBJ_TETRAHEDRON:
+      return sdfTetrahedron(transformedRay,currentObjectSize[0]);
   }
 }
 
@@ -362,7 +327,6 @@ void exploreBvh(vec3 ray,vec3 rayD) //Gets the only objects in the scene that th
 {
 
   int currentNodeIndex=bvhNodeCount-1; //The root node is added for exploration.
-  //push(objectStack,objectStackPointer,0); //The ground's SDF is always calculated.
   push(0); //The ground's SDF is always calculated.
   
   //The BVH hierarchy is explored depth-first in order to exclude objects that the ray cannot possibly hit.
@@ -372,19 +336,18 @@ void exploreBvh(vec3 ray,vec3 rayD) //Gets the only objects in the scene that th
     int skipNodeIndex=getIntFromTexture(bvhData,currentNodeIndex,5);
     int leafObjectIndex=getIntFromTexture(bvhData,currentNodeIndex,6);
 
-    if(!rayIntersectsBvhNode(ray,rayD,currentNodeIndex))
+    if(rayIntersectsBvhNode(ray,rayD,currentNodeIndex))
+    {
+      currentNodeIndex=nextNodeIndex; //The tree is traversed in the normal depth-first order.
+    }
+    else
     {
       currentNodeIndex=skipNodeIndex; //The ray does not intersect this node, meaning that there are no objects below this node in the hierarchy that the ray can possibly hit.
       continue;
     }
-    else
-    {
-      currentNodeIndex=nextNodeIndex; //The tree is traversed in the normal depth-first order.
-    }
 
     if(leafObjectIndex!=-1) //The current node is a leaf node.
     {
-      //push(objectStack,objectStackPointer,leafObjectIndex);
       push(leafObjectIndex);
       continue;
     }
@@ -490,7 +453,7 @@ void main()
   float skyI=0.1;
   
   vec3 accumulatedAttenuation=vec3(1.0); //Holds the light attenuation from the previous bounces in order to get the total contribution of the sun and sky reflecting off of the current object to the current pixel on the camera.
-  vec3 outputColour=vec3(0.0,0.0,0.0); //The output colour of this pixel. Is initally set to black.
+  vec3 outputColour=vec3(0.0); //The output colour of this pixel. Is initally set to black.
   for(int ri=0;ri<MAXIMUM_REFLECTIONS;ri++) //Loops over multiple reflections if needed.
   {
     int hitObjectIndex=0;
@@ -517,14 +480,13 @@ void main()
       
       vec3 randomLightVector=randomConeVector(hitPosition+vec3(frameNumber),normalize(lightD),(SUN_RADIUS*PI)/180.0); //A direction to a random point in the sun's disk.
       vec3 directAttenuationPerSa=(hitObjectColour/PI)*dot(hitNormal,randomLightVector); //Lambertian attenuation of the sun to the diffuse object of the current bounce.
-      int shadowHitIndex=0;                
-      marchRay(rayO,randomLightVector,shadowHitIndex);   
-      directAttenuationPerSa*=(shadowHitIndex!=-1)? 0.0:1.0; //The sun contributes nothing in this bounce if the path to it is blocked by an object.
+      marchRay(rayO,randomLightVector,hitObjectIndex);   
+      directAttenuationPerSa*=float(hitObjectIndex<0); //The sun contributes nothing in this bounce if the path to it is blocked by an object.
       
       outputColour+=accumulatedAttenuation*sunSolidAngle*(directAttenuationPerSa*vec3(sunI)); //The contribution of the sun's light bouncing off this object is attenuated by the previous light bounces and then added to the total.
       rayD=randomConeVector(hitPosition+(vec3(frameNumber)*0.9),hitNormal,PI/2.0); //A random direction within a hemisphere centred on the surface normal for the next bounce.
       vec3 indirectAttenuationPerSa=(hitObjectColour/PI)*dot(hitNormal,rayD); //Lambertian attenuation of light from the next bounce to the current object.
-      accumulatedAttenuation*=indirectAttenuationPerSa*(2.0*PI-sunSolidAngle); //The current attenuation is modified th include the new bounce.
+      accumulatedAttenuation*=indirectAttenuationPerSa*(2.0*PI-sunSolidAngle); //The current attenuation is modified to include the new bounce.
     }
     else //The material is reflective and the colour is will be the colours of what the reflection ray hits.
     {
