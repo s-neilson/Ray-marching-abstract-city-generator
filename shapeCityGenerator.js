@@ -645,10 +645,10 @@ function addBuilding(position,scale)
       size=[scale*r,scale*h,0.0];
       break;
     case 15:
-      size=[random(0.35,0.45),0.0,0.0];
+      size=[scale*random(0.35,0.45),0.0,0.0];
       break;
     case 16:
-      size=[random(0.35,0.45),0.0,0.0];
+      size=[scale*random(0.35,0.45),0.0,0.0];
       break;
   }
 
