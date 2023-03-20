@@ -1,7 +1,9 @@
 var cityTiles=[];
 var tileCount=60;
-var largeBuildingChance=0.1;
-var smallBuildingChance=0.6;
+var buildingChances=[0.6,0.1,0.02];
+
+var roadColour=[0.4,0.4,0.4];
+var footpathColour=[0.78,0.78,0.78];
 
 var rSr1=["ffo"];
 var rBlock=["llffffrrfo","llfflo","rrffro","rrffffll"];
@@ -25,11 +27,7 @@ var bvhData;
 //example from https://blog.bruce-hill.com/a-faster-weighted-random-choice
 function weightedChoose(weights,items)
 {
-  var weightSum=0.0;
-  for(let i of weights)
-  {
-    weightSum+=i;
-  }
+  var weightSum=weights.reduce((a,b)=>a+b);
   
   var remainingSum=random()*weightSum; //remainingSum is placed a random distance along a line containing the fractions of each weight.
   for(let i=0;i<weights.length;i++)
@@ -56,7 +54,7 @@ class CityTile
   //Joins two tiles together as roads.
   joinRoadTile(otherTile)
   {
-    for(let i=0;i<=3;i++)
+    for(let i=0;i<4;i++)
     {
       let i2=2**i;
       if(this.neighbours[i]===otherTile)
@@ -72,31 +70,21 @@ class CityTile
     }
   }
   
-  //Determines is a small building can be placed on this tile. This is if at least one of the four neighbouring tiles is a road tile and if this tile is currently free.
-  canPlaceSmallBuilding()
+  //Determines if a building can be placed on this tile. This is if all the tiles are free and at least one tile has a neighbour as a road.
+  canPlaceBuilding(size,buildingTiles)
   {
-    if(this.tileType) //If the current tile already has a type.
+    var squaresAreFree=true,atLeastOneRoadSurrounds=false;
+
+    for(let i=0,iT=this;i<size;i++,iT=iT.neighbours[0])
     {
-      return false;
-    }
-    
-    for(let i of this.neighbours)
-    {
-      if(i.roadConnections) //If this neighbouring tile is a road tile.
+      for(let j=0,jT=iT;j<size;j++,jT=jT.neighbours[1])
       {
-        return true;
-      }
+        squaresAreFree&=!jT.tileType;
+        atLeastOneRoadSurrounds|=jT.neighbours.reduce((a,b)=>a||(b.roadConnections),0);
+        buildingTiles.push(jT);
+      }    
     }
     
-    return false;
-  }
-  
-  //Determines if a large building (2x2 tiles) can be placed with the lower-left corner as this tile. This will occur if at least one tile surrounding the four tiles of the building will be a road tile and all of the four tiles
-  //the building will be made from are free.
-  canPlaceLargeBuilding()
-  {
-    var squaresAreFree=!((this.tileType)||(this.neighbours[0].tileType)||(this.neighbours[1].tileType)||(this.neighbours[0].neighbours[1].tileType));
-    var atLeastOneRoadSurrounds=(this.canPlaceSmallBuilding())||(this.neighbours[0].canPlaceSmallBuilding())||(this.neighbours[1].canPlaceSmallBuilding())||(this.neighbours[0].neighbours[1].canPlaceSmallBuilding());
     return squaresAreFree&&atLeastOneRoadSurrounds;
   }
 }
@@ -182,7 +170,7 @@ function generateRoadLayout(numberOfIterations,ruleWeights,rules)
     }
     
     roadBuilders=newRoadBuilders; //The newly created RoadBuilders are made active.
-    currentNumberOfIterations+=1;
+    currentNumberOfIterations++;
   }
 }
 
@@ -288,44 +276,25 @@ function determineRoadTiles()
   }
 }
 
-//Attempts to first place large buildings at each free square with a specific probability, and then it attempts to place small buildings on each remaining free
-//square at a different probability.
-function determineBuildingTiles(largeBuildingChance,smallBuildingChance)
+//Attempts to places buildings from largest to smallest with certain probabilities.
+function determineBuildingTiles()
 {
-  //Large building placement occurs first.
-  for(let ctX of cityTiles)
+  for(let i=buildingChances.length-1;i>=0;i--)
   {
-    for(let ctXY of ctX)
+    let buildingChance=buildingChances[i];
+    let buildingSize=i+1;
+
+    for(let ctX of cityTiles)
     {
-      if(!(ctXY.tileType)) //If the current tile has not been assigned yet.
+      for(let ctXY of ctX)
       {
-        if((ctXY.canPlaceLargeBuilding())&&(random()<largeBuildingChance)) //If a large building can be placed here and the random choice to place a large building here has been successful.
+        let buildingTiles=[];
+        if(ctXY.canPlaceBuilding(buildingSize,buildingTiles)&&(random()<buildingChance)) //If a building can be placed here and the random choice to place the building here has been successful.
         {
-          //A 2x2 area with this tile as the lower left corner is designated as a large building.
-          ctXY.tileType=2;
-          ctXY.neighbours[0].tileType=2;
-          ctXY.neighbours[1].tileType=2;
-          ctXY.neighbours[0].neighbours[1].tileType=2;      
-          
-          buildingX=ctXY.position[0]+0.5;
-          buildingY=ctXY.position[1]+0.5;
-          addBuilding([buildingX,buildingY,0.0],2.0);
-        }
-      }
-    }
-  }
-  
-  //Small building placement.
-  for(let ctX of cityTiles)
-  {
-    for(let ctXY of ctX)
-    {
-      if(!(ctXY.tileType)) //If the current tile has not been assigned yet.
-      {
-        if((ctXY.canPlaceSmallBuilding())&&(random()<smallBuildingChance)) 
-        {
-          ctXY.tileType=3;  
-          addBuilding(ctXY.position,1.0);
+          buildingTiles.forEach(a=>a.tileType=2); //Assigns the tiles as belonging to a building.
+          let buildingX=ctXY.position[0]+((buildingSize-1)/2.0);
+          let buildingY=ctXY.position[1]+((buildingSize-1)/2.0);
+          addBuilding([buildingX,buildingY,0.0],float(buildingSize));
         }
       }
     }
@@ -342,7 +311,7 @@ function getCityCentre()
     {
       if(ctXY.tileType==1)
       {
-        roadPieceCount+=1;
+        roadPieceCount++;
         cx+=ctXY.position[0];
         cy+=ctXY.position[1];
       }
@@ -376,7 +345,7 @@ class SceneObject
     vec3ToTexture(this.index,7,objectData,this.size);
     vec3ToTexture(this.index,10,objectData,this.colour);
     objectData.set(this.index,13,intToColourArray(this.material));
-    currentObjectIndex+=1;
+    currentObjectIndex++;
   }
 }
 
@@ -422,7 +391,7 @@ class BvhNode //A spherical node in a ball-tree based bounding volume hierarchy.
     var leafObjectIndex=(this.leafObject) ? this.leafObject.index:-1;
     bvhData.set(this.index,6,intToColourArray(leafObjectIndex));
     
-    currentBvhNodeIndex+=1;
+    currentBvhNodeIndex++;
   }
  
  
@@ -432,27 +401,17 @@ class BvhNode //A spherical node in a ball-tree based bounding volume hierarchy.
     {
       return null;
     }
-    
-    if(this.parent.rightChild==this)
-    {
-      return this.parent.nextNodeSkip(); //Ancestor nodes should be searched for the first unexplored node if this is a rightChild node.
-    }
-    else //Returns the right sibling of a leftChild node.
-    {
-      return this.parent.rightChild;
-    }
+
+    //Ancestor nodes should be searched for the first unexplored node if this is a rightChild
+    //node, else the right sibling is returned.
+    return (this.parent.rightChild==this) ? this.parent.nextNodeSkip():this.parent.rightChild;
   }
    
   nextNodeNormal() //Gets the next node in a depth-first traversal of the BVH tree.
   {
-    if(this.leafObject)
-    {
-      return this.nextNodeSkip(); //Returns the sibling if this is a leftChild node or the first unexplored node if it is a rightChild node.
-    }
-    else
-    {
-      return this.leftChild; //Looks at left-most child nodes first.
-    }
+    //If it is a leaf node it returns the sibling if this is a leftChild node or the first unexplored node if it is a rightChild node.
+    //Else it looks at left-most child nodes first.
+    return (this.leafObject) ? this.nextNodeSkip():this.leftChild;
   }
   
   //Determines the paths that the shader will need to take in order to traverse the BVH tree.
@@ -499,7 +458,7 @@ function buildBVH(objectList)
   
   while(currentNodesToPair.length>1) //While the root node has not been created. Loops through all levels in the highrarchy.
   {
-    nodePairs=[];
+    let nodePairs=[];
     for(let i of currentNodesToPair) //Determines the separation between every node pair.
     {
       for(let j of currentNodesToPair)
@@ -510,14 +469,14 @@ function buildBVH(objectList)
         }
       }
     }   
-    nodePairs.sort((a,b)=>{return a[2]-b[2];}); //Sorts the node pairs in ascending order based on separation.
+    nodePairs.sort((a,b)=>a[2]-b[2]); //Sorts the node pairs in ascending order based on separation.
     
     var newCurrentNodesToPair=[];
     for(let i of nodePairs)
     {
       var paired1=i[0].paired;
       var paired2=i[1].paired;
-      if((!paired1)&&(!paired2)) //If both nodes have not been paired yet, they are enclosed by and made children of a new node.
+      if(!(paired1||paired2)) //If both nodes have not been paired yet, they are enclosed by and made children of a new node.
       {
         newCurrentNodesToPair.push(new BvhNode(i[0],i[1],null));
         i[0].paired=true;
@@ -540,37 +499,39 @@ function buildBVH(objectList)
   return currentNodesToPair[0]; //The root node.
 }
 
+//Converts a number into a sequence of three bytes by converting it to base 256.
+function nToB256(input)
+{
+  var x=input;
+  var result=[0,0,0,255];
 
+  for(let i=2;i>=0;i--)
+  {
+    result[i]=floor(x/(256**i));
+    x%=(256**i);
+  }
 
-//Converts a floating point number into a sequence of three bytes by converting it to base 256. 2000 is added to the input
-//and that is multiplied by 4096 so a large range of floating point values between -2000 and 2000 can be stored.
+  return result;
+}
+
 function floatToColourArray(input)
 {
-  var remainingInput=(input+2000.0)*4096.0; //The input is shifted and scaled.
-  var column3=floor(remainingInput/65536.0); //How many of remainingInput can fit in the 256^2 column.
-  remainingInput=remainingInput%65536; //The amount left over that does not fit into the 256^2 column.
-  var column2=floor(remainingInput/256.0); 
-  remainingInput=remainingInput%256; 
-  var column1=floor(remainingInput); 
-  return [column1,column2,column3,255];
+  var remainingInput=(input+2000.0)*4096.0; //The input is shifted and scaled so a large range of floating point values between -2000 and 2000 can be stored. 
+  return nToB256(remainingInput);
 }
 
 function intToColourArray(input)
 {
   var remainingInput=input+8388608;
-  var column3=floor(remainingInput/65536.0);
-  remainingInput=remainingInput%65536;
-  var column2=floor(remainingInput/256.0); 
-  remainingInput=remainingInput%256; 
-  var column1=floor(remainingInput); 
-  return [column1,column2,column3,255];
+  return nToB256(remainingInput);
 }
 
 function vec3ToTexture(iX,iY,dataTexture,inputArray)
 {
-  dataTexture.set(iX,iY,floatToColourArray(inputArray[0]));  
-  dataTexture.set(iX,iY+1,floatToColourArray(inputArray[1]));
-  dataTexture.set(iX,iY+2,floatToColourArray(inputArray[2]));
+  for(let i=0;i<3;i++)
+  {
+    dataTexture.set(iX,iY+i,floatToColourArray(inputArray[i]));
+  }
 }
 
 
@@ -582,32 +543,32 @@ function addObject(type,position,rotation,size,colour,material)
 
 function addRoadStraight(position,direction)
 {
-  addObject(0,position,[0.0,0.0,HALF_PI*direction],[0.5,0.0,0.0],[0.4,0.4,0.4],0);
-  addObject(5,position,[0.0,0.0,HALF_PI*direction],[0.5,0.0,0.0],[0.78,0.78,0.78],0);
+  addObject(0,position,[0.0,0.0,HALF_PI*direction],[0.5,0.0,0.0],roadColour,0);
+  addObject(5,position,[0.0,0.0,HALF_PI*direction],[0.5,0.0,0.0],footpathColour,0);
 }
 
 function addRoadCurve(position,direction)
 {
-  addObject(1,position,[0.0,0.0,HALF_PI*direction],[0.5,0.0,0.0],[0.4,0.4,0.4],0);
-  addObject(6,position,[0.0,0.0,HALF_PI*direction],[0.5,0.0,0.0],[0.78,0.78,0.78],0);
+  addObject(1,position,[0.0,0.0,HALF_PI*direction],[0.5,0.0,0.0],roadColour,0);
+  addObject(6,position,[0.0,0.0,HALF_PI*direction],[0.5,0.0,0.0],footpathColour,0);
 }
 
 function addRoadT(position,direction)
 {
-  addObject(2,position,[0.0,0.0,HALF_PI*direction],[0.5,0.0,0.0],[0.4,0.4,0.4],0);
-  addObject(7,position,[0.0,0.0,HALF_PI*direction],[0.5,0.0,0.0],[0.78,0.78,0.78],0);
+  addObject(2,position,[0.0,0.0,HALF_PI*direction],[0.5,0.0,0.0],roadColour,0);
+  addObject(7,position,[0.0,0.0,HALF_PI*direction],[0.5,0.0,0.0],footpathColour,0);
 }
 
 function addRoadCross(position)
 {
-  addObject(3,position,[0.0,0.0,0.0],[0.5,0.0,0.0],[0.4,0.4,0.4],0);
-  addObject(8,position,[0.0,0.0,0.0],[0.5,0.0,0.0],[0.78,0.78,0.78],0);
+  addObject(3,position,[0.0,0.0,0.0],[0.5,0.0,0.0],roadColour,0);
+  addObject(8,position,[0.0,0.0,0.0],[0.5,0.0,0.0],footpathColour,0);
 }
 
 function addRoadEnd(position,direction)
 {
-  addObject(4,position,[0.0,0.0,HALF_PI*direction],[0.5,0.0,0.0],[0.4,0.4,0.4],0);
-  addObject(9,position,[0.0,0.0,HALF_PI*direction],[0.5,0.0,0.0],[0.78,0.78,0.78],0);
+  addObject(4,position,[0.0,0.0,HALF_PI*direction],[0.5,0.0,0.0],roadColour,0);
+  addObject(9,position,[0.0,0.0,HALF_PI*direction],[0.5,0.0,0.0],footpathColour,0);
 }
 
 function randomColour()
@@ -699,7 +660,7 @@ function setup()
   var roadBuilderRuleChances=[0.7,0.3];
   generateRoadLayout(5,roadBuilderRuleChances,roadBuilderRules);
   determineRoadTiles();
-  determineBuildingTiles(largeBuildingChance,smallBuildingChance);
+  determineBuildingTiles();
   
   objectData.updatePixels();
   

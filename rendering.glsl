@@ -46,6 +46,10 @@ uniform sampler2D bvhData;
 int objectStack[MAX_STACK_SIZE];
 int objectStackPointer=-1;
 
+//x,y and z unit vectors.
+vec2 uO=vec2(1.0,0.0);
+vec3 uX,uY,uZ;
+
 //All SDFs are centred at position 0,0,0.
 float sdfPlane(vec3 ray)
 {
@@ -98,17 +102,14 @@ float sdfAnnulus(vec3 ray,float r,float t,float h)
 
 float sdfOctahedron(vec3 ray,float r)
 {
-  return dot(normalize(vec3(1.0)),abs(ray)-vec3(r,0.0,0.0));
+  return dot(normalize(vec3(1.0)),abs(ray)-(uX*r));
 }
 
 float sdfTetrahedron(vec3 ray,float r)
 {
-  //Vertex positions;
-  float vc=r/3.464;
-  vec3 v1=vec3(-vc,-vc,-vc);
-  vec3 v2=vec3(vc,vc,-vc);
-  vec3 v3=vec3(vc,-vc,vc);
-  vec3 v4=vec3(-vc,vc,vc);
+  //Vertex positions
+  vec3 vO=(uX-uY)*(r/3.464);
+  vec3 v1=vO.yyy,v2=vO.xxy,v3=vO.xyx,v4=vO.yxx;
 
   //Face perpendicular distances.
   float d1=dot(normalize(v1),ray-v1);
@@ -133,18 +134,18 @@ float sdfRoadCurve(vec3 ray)
 
 float sdfRoadT(vec3 ray)
 {
-  return min(sdfRoadStraight(ray),sdfBox(vec3(ray.x,ray.y-0.25,ray.z),vec3(0.25,0.255,0.0625)));
+  return min(sdfRoadStraight(ray),sdfBox(ray-(uY*0.25),vec3(0.25,0.25,0.0625)));
 }
 
 float sdfRoadCross(vec3 ray)
 {
-  return min(sdfRoadStraight(ray),sdfBox(ray,vec3(0.25,0.5,0.0625)));
+  return min(sdfRoadStraight(ray),sdfRoadStraight(ray.yxz));
 }
 
 float sdfRoadEnd(vec3 ray)
 {
   float cylinderSdf=sdfAnnulus(ray,0.125,0.25,0.125);
-  return min(cylinderSdf,sdfBox(ray-vec3(0.0,0.25,0.0),vec3(0.25,0.25,0.0625)));
+  return min(cylinderSdf,sdfBox(ray-(uY*0.25),vec3(0.25,0.25,0.0625)));
 }
 
 float sdfFootpathHalfStraight(vec3 ray)
@@ -159,7 +160,7 @@ float sdfFootpathStraight(vec3 ray)
 
 float sdfFootpathCurve(vec3 ray)
 {
-  vec3 centrePosition=vec3(-0.5,0.5,0.0);
+  vec3 centrePosition=(uY-uX)*0.5;
   float innerAnnulusSdf=sdfAnnulus(ray-centrePosition,0.1875,0.125,0.25);
   float outerAnnulusSdf=sdfAnnulus(ray-centrePosition,0.8125,0.125,0.25);
   float uncutFootpathSdf=min(innerAnnulusSdf,outerAnnulusSdf);
@@ -203,7 +204,7 @@ vec3 randomConeVector(vec3 seed,vec3 n,float angle)
   vec3 cBx=cross(n,vec3(0.796,0.239,-0.557));
   vec3 cBy=cross(n,cBx);
 
-  //Uniformly randomly sampling on a cyclinder and projecting to a sphere is the same as uniform random sampling on the sphere.
+  //Uniformly randomly sampling on a cylinder and projecting to a sphere is the same as uniform random sampling on the sphere.
   float randomAngle=randomNumber(seed+1.0,0.0,2.0*PI); //A random angle around the vector "n".
   float cCn=randomNumber(seed,cos(angle),1.0); //The "n" vector component. Vertical distance on the unit sphere above angles less than "angle".
   float cCx=sqrt(1.0-(cCn*cCn))*sin(randomAngle);
@@ -245,7 +246,7 @@ vec3 getVec3FromTexture(sampler2D inputTexture,int iX,int iY)
 
 void push(int value)
 {
-  if(objectStackPointer<=(MAX_STACK_SIZE-1)) //Prevents the stack from overflowing.
+  if(objectStackPointer<MAX_STACK_SIZE) //Prevents the stack from overflowing.
   {
     objectStackPointer+=1;
     objectStack[objectStackPointer]=value;
@@ -315,7 +316,7 @@ bool rayIntersectsBvhNode(vec3 rayO,vec3 rayD,int bvhNodeIndex)
   float bnRayDistance=distance(bnC,rayO);
   float bn_ray_projRayD=dot(bn_ray,rayD);
 
-  bool bnInFront=dot(bn_ray,rayD)>0.0; //If the current BVH node is not behind the ray.
+  bool bnInFront=bn_ray_projRayD>0.0; //If the current BVH node is not behind the ray.
   bool intersects=pow(bnRayDistance,2.0)-pow(bn_ray_projRayD,2.0)<=pow(bnR,2.0); //The ray collides with the BNH node's sphere.
   bool intersectsInFront=bnInFront&&intersects;
   bool rayInside=bnRayDistance<bnR; //The ray collides with the BVH node because it is inside it.
@@ -380,9 +381,9 @@ float totalSdf(vec3 ray,out int closestObjectIndex)
 vec3 calculateNormal(vec3 p,int hitObjectIndex)
 {
   float dP=0.0005; //The change in each ordinate of p to calculate the derivatives with.
-  float dSdf_dx=(objectSdf(p+vec3(dP,0.0,0.0),hitObjectIndex)-objectSdf(p-vec3(dP,0.0,0.0),hitObjectIndex))/(2.0*dP);
-  float dSdf_dy=(objectSdf(p+vec3(0.0,dP,0.0),hitObjectIndex)-objectSdf(p-vec3(0.0,dP,0.0),hitObjectIndex))/(2.0*dP);
-  float dSdf_dz=(objectSdf(p+vec3(0.0,0.0,dP),hitObjectIndex)-objectSdf(p-vec3(0.0,0.0,dP),hitObjectIndex))/(2.0*dP);
+  float dSdf_dx=(objectSdf(p+(uX*dP),hitObjectIndex)-objectSdf(p-(uX*dP),hitObjectIndex))/(2.0*dP);
+  float dSdf_dy=(objectSdf(p+(uY*dP),hitObjectIndex)-objectSdf(p-(uY*dP),hitObjectIndex))/(2.0*dP);
+  float dSdf_dz=(objectSdf(p+(uZ*dP),hitObjectIndex)-objectSdf(p-(uZ*dP),hitObjectIndex))/(2.0*dP);
   return vec3(dSdf_dx,dSdf_dy,dSdf_dz);
 }
 
@@ -397,7 +398,7 @@ vec3 marchRay(in vec3 rayO,vec3 rayD,out int hitObjectIndex)
   objectStackPointer=-1;
   exploreBvh(ray,rayD);
   
-  for(int i=0;i>-1;i++)
+  for(int i=0;;i++)
   {
     float marchDistance=length(ray-rayO);
     if((i>300)||(marchDistance>1000.0)) //A maximum of 300 marching steps or 1000 distance.
@@ -426,7 +427,7 @@ vec3 marchRay(in vec3 rayO,vec3 rayD,out int hitObjectIndex)
 vec3 getCameraRay(vec2 screenFraction,float cameraScreenSize,out vec3 orthographicScreenPosition)
 {
   vec3 cameraForwardUnit=normalize(cameraForward);
-  vec3 cameraRight=cross(cameraForwardUnit,vec3(0.0,0.0,1.0));
+  vec3 cameraRight=cross(cameraForwardUnit,uZ);
   vec3 cameraUp=cross(cameraRight,cameraForwardUnit);
  
   float aspectRatio=resolution.y/resolution.x;
@@ -442,6 +443,7 @@ vec3 getCameraRay(vec2 screenFraction,float cameraScreenSize,out vec3 orthograph
 out vec4 fragColour;
 void main()
 {
+  uX=uO.xyy,uY=uO.yxy,uZ=uO.yyx;
   vec2 screenFraction=gl_FragCoord.xy/resolution.xy;
 
   vec3 rayO=cameraLocation;
@@ -465,7 +467,7 @@ void main()
     int hitObjectMaterial=getIntFromTexture(objectData,hitObjectIndex,13);
 
 
-    if(hitObjectIndex==-1) //If the ray does not hit anything, takes to many steps or has travelled too far it is assumed to hit the sky.
+    if(hitObjectIndex<0) //If the ray does not hit anything, takes to many steps or has travelled too far it is assumed to hit the sky.
     {
       outputColour+=accumulatedAttenuation*(2.0*PI)*(mix(vec3(0.31,0.59,1.0),vec3(0.0,0.4,1.0),rayD.z)*skyI);
       break;
