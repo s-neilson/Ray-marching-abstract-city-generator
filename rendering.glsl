@@ -33,8 +33,9 @@ precision highp int;
 uniform vec2 resolution;
 uniform sampler2D currentScreen;
 uniform float frameNumber;
-uniform vec3 cameraLocation;
-uniform vec3 cameraForward;
+uniform vec3 cameraLocation,cameraForward;
+
+uniform float sunRadius,sunI,skyI;
 uniform vec3 lightD;
 
 uniform int objectCount;
@@ -75,7 +76,7 @@ float sdfTorus(vec3 ray,float r1,float r2)
 float sdfCone(vec3 ray,float r,float h)
 {
   vec2 circumfrenceCoordinates=ringCoordinates(ray,r); //The cone's side is made from the revolution of a triangle of width "r" and height "h".
-  vec2 curvedSideNormal=normalize(vec2(1,r/h)); //The normal of the curved side face in the 2d cross-section.
+  vec2 curvedSideNormal=normalize(vec2(1.0,r/h)); //The normal of the curved side face in the 2d cross-section.
   float sdfCurvedSide=dot(curvedSideNormal,circumfrenceCoordinates); //The signed perpendicular distance to the curved side of the cone.
   float sdfBase=-ray.z;
   return max(sdfCurvedSide,sdfBase);
@@ -150,7 +151,7 @@ float sdfRoadEnd(vec3 ray)
 
 float sdfFootpathHalfStraight(vec3 ray)
 {
-  return sdfBox(ray+vec3(0.0,0.3125,0.0),vec3(0.5,0.0625,0.125)); 
+  return sdfBox(ray+(uY*0.3125),vec3(0.5,0.0625,0.125)); 
 }
 
 float sdfFootpathStraight(vec3 ray)
@@ -350,7 +351,6 @@ void exploreBvh(vec3 ray,vec3 rayD) //Gets the only objects in the scene that th
     if(leafObjectIndex!=-1) //The current node is a leaf node.
     {
       push(leafObjectIndex);
-      continue;
     }
   }  
 }
@@ -421,10 +421,9 @@ vec3 marchRay(in vec3 rayO,vec3 rayD,out int hitObjectIndex)
   return ray;
 }
 
-//Determines the direction that rays move out from the camera based on the pixel position.
-//Rays pass through the camera apeture and hit one point on the screen like a pinhole camera.
-//Can also be used to simulate an orthographic viewpoint (zero field of view from an infinite distance).
-vec3 getCameraRay(vec2 screenFraction,float cameraScreenSize,out vec3 orthographicScreenPosition)
+//Determines the position that rays move out from the camera based on the pixel position.
+//Camera uses an orthographic viewpoint (zero field of view from an infinite distance).
+vec3 getOrthographicCameraRay(vec2 screenFraction,float cameraScreenSize)
 {
   vec3 cameraForwardUnit=normalize(cameraForward);
   vec3 cameraRight=cross(cameraForwardUnit,uZ);
@@ -434,9 +433,7 @@ vec3 getCameraRay(vec2 screenFraction,float cameraScreenSize,out vec3 orthograph
   float cameraPixelX=mix(-cameraScreenSize,cameraScreenSize,screenFraction.x);
   float cameraPixelY=mix(-cameraScreenSize,cameraScreenSize,screenFraction.y)*aspectRatio;
   vec3 cameraPixelLocation=(cameraRight*cameraPixelX)+(cameraUp*cameraPixelY); // The location of the pixel on the camera screen.
-  orthographicScreenPosition=cameraLocation+cameraPixelLocation;
-
-  return normalize(cameraPixelLocation+cameraForwardUnit); //The direction from the camera's location to the current camera pixel.
+  return cameraLocation+cameraPixelLocation;
 }
 
 
@@ -446,13 +443,8 @@ void main()
   uX=uO.xyy,uY=uO.yxy,uZ=uO.yyx;
   vec2 screenFraction=gl_FragCoord.xy/resolution.xy;
 
-  vec3 rayO=cameraLocation;
-  getCameraRay(screenFraction,15.0,rayO); 
+  vec3 rayO=getOrthographicCameraRay(screenFraction,15.0); 
   vec3 rayD=normalize(cameraForward);
-  //float cameraScreenSize=tan((PI/2.0)/2.0);
-  //vec3 rayD=getCameraRay(screenFraction,cameraScreenSize);
-  float sunI=0.75;
-  float skyI=0.1;
   
   vec3 accumulatedAttenuation=vec3(1.0); //Holds the light attenuation from the previous bounces in order to get the total contribution of the sun and sky reflecting off of the current object to the current pixel on the camera.
   vec3 outputColour=vec3(0.0); //The output colour of this pixel. Is initally set to black.
@@ -477,7 +469,7 @@ void main()
     
     if(hitObjectMaterial==MAT_DIFFUSE)
     {
-      float sunSolidAngle=2.0*PI*(1.0-cos(SUN_RADIUS));
+      float sunSolidAngle=2.0*PI*(1.0-cos(sunRadius));
 
       
       vec3 randomLightVector=randomConeVector(hitPosition+vec3(frameNumber),normalize(lightD),(SUN_RADIUS*PI)/180.0); //A direction to a random point in the sun's disk.

@@ -1,4 +1,5 @@
 var cityTiles=[];
+var edgeTile=null;
 var tileCount=60;
 var buildingChances=[0.6,0.1,0.02];
 
@@ -70,7 +71,7 @@ class CityTile
     }
   }
   
-  //Determines if a building can be placed on this tile. This is if all the tiles are free and at least one tile has a neighbour as a road.
+  //Determines if a building of a specific size can be placed on this tile. This is if all the tiles are free and at least one tile has a neighbour as a road.
   canPlaceBuilding(size,buildingTiles)
   {
     var squaresAreFree=true,atLeastOneRoadSurrounds=false;
@@ -79,6 +80,11 @@ class CityTile
     {
       for(let j=0,jT=iT;j<size;j++,jT=jT.neighbours[1])
       {
+        if(jT==edgeTile)
+        {
+          return false;
+        }
+        
         squaresAreFree&=!jT.tileType;
         atLeastOneRoadSurrounds|=jT.neighbours.reduce((a,b)=>a||(b.roadConnections),0);
         buildingTiles.push(jT);
@@ -100,8 +106,8 @@ class RoadBuilder
     
     //Various directions relative to the starting tile and direction of the RoadBuilder.
     this.forwardDirection=this.startingDirection;
-    this.leftDirection=(this.startingDirection==0) ? 3:this.startingDirection-1;
-    this.rightDirection=(this.startingDirection==3) ? 0:this.startingDirection+1;
+    this.leftDirection=abs((this.startingDirection-1)%4);
+    this.rightDirection=(this.startingDirection+1)%4;
     this.backwardDirection=(this.startingDirection+2)%4;
   }
   
@@ -113,36 +119,24 @@ class RoadBuilder
     {
       var currentTile=this.startingTile;
       var currentDirection=this.startingDirection;
-      var exitSubrule=false; //Exits when a new RoadBuilder is to be created.
       for(let i of subrule)
       {
-        switch(i) //Determines what to do for the current entry in the rulestring.
+        if(i=="o") //If a new RoadBuilder is to be created.
         {
-          case "f":
-            currentDirection=this.forwardDirection;
-            break;
-          case "l":
-            currentDirection=this.leftDirection;
-            break;
-          case "r":
-            currentDirection=this.rightDirection;
-            break;
-          case "b":
-            currentDirection=this.backwardDirection;
-            break;
-          case "o":
-            newRoadBuilders.push(new RoadBuilder(currentTile,currentDirection));
-            exitSubrule=true;
-            break;         
+          newRoadBuilders.push(new RoadBuilder(currentTile,currentDirection));
+          break;
         }
         
-        if(exitSubrule)
+        //A new road tile is joined to the current one and then the new road tile is made the current one.
+        let directions={"f":this.forwardDirection,"l":this.leftDirection,"r":this.rightDirection,"b":this.backwardDirection};
+        currentDirection=directions[i];
+        let newTile=currentTile.neighbours[currentDirection];
+        
+        if(newTile==edgeTile) //The road builder cannot continue any more.
         {
           break;
         }
         
-        //The new tile is joined to the current one and then the new tile is made the current one.
-        var newTile=currentTile.neighbours[currentDirection];
         newTile.joinRoadTile(currentTile);
         currentTile=newTile;                
       }
@@ -175,14 +169,15 @@ function generateRoadLayout(numberOfIterations,ruleWeights,rules)
 }
 
 
-function createTileGrid(sizeX,sizeY)
+function createTileGrid()
 {
   //The CityTiles are created in a grid.
   var tileGrid=[];
-  for(let x=0;x<sizeX;x++)
+  edgeTile=new CityTile();
+  for(let x=0;x<tileCount;x++)
   {
     var tileGridRow=[];
-    for(let y=0;y<sizeY;y++)
+    for(let y=0;y<tileCount;y++)
     {
       var newCityTile=new CityTile();
       tileGridRow.push(newCityTile);
@@ -191,23 +186,19 @@ function createTileGrid(sizeX,sizeY)
   }
   
   //The neighbours for each tile are assigned.
-  for(let x=0;x<sizeX;x++)
+  for(let x=0;x<tileCount;x++)
   {
-    for(let y=0;y<sizeY;y++)
+    for(let y=0;y<tileCount;y++)
     {
-      //Neighbours are wrapped around on the grid edges so that the city block will be able to tile with itself.
-      var upIndex=(y==(sizeY-1) ? 0:y+1);
-      var downIndex=(y==0 ? sizeY-1:y-1);
-      var leftIndex=(x==0 ? sizeX-1:x-1);
-      var rightIndex=(x==(sizeX-1) ? 0:x+1);
-
-      var upNeighbour=tileGrid[x][upIndex];
-      var downNeighbour=tileGrid[x][downIndex];
-      var leftNeighbour=tileGrid[leftIndex][y];
-      var rightNeighbour=tileGrid[rightIndex][y];
+      //The edges of the tile grid are made up of edge tiles that are not iterated over further on and
+      //have no road connections or buildings on them.
+      var upNeighbour=((y==(tileCount-1)) ? edgeTile:tileGrid[x][y+1]);
+      var downNeighbour=((y==0) ? edgeTile:tileGrid[x][y-1]);
+      var leftNeighbour=((x==0) ? edgeTile:tileGrid[x-1][y]);
+      var rightNeighbour=((x==(tileCount-1)) ? edgeTile:tileGrid[x+1][y]);
       
       tileGrid[x][y].neighbours=[upNeighbour,rightNeighbour,downNeighbour,leftNeighbour];
-      tileGrid[x][y].position=[(x+0.5)-(sizeX/2.0),(y+0.5)-(sizeY/2.0),0.0];
+      tileGrid[x][y].position=[(x+0.5)-(tileCount/2.0),(y+0.5)-(tileCount/2.0),0.0];
     }
   }
   
@@ -221,56 +212,27 @@ function determineRoadTiles()
   {
     for(let ctXY of ctX)
     {
-      ctXY.tileType=1;
-      switch(ctXY.roadConnections)
+      if(ctXY.roadConnections)
       {
-        case 10: //Horizontal straight.
-          addRoadStraight(ctXY.position,0);
-          break;
-        case 5: //Vertical straight.
-          addRoadStraight(ctXY.position,1);
-          break;
-        case 9: //Left-up turn.
-          addRoadCurve(ctXY.position,0);
-          break;
-        case 3: //Right-up turn.
-          addRoadCurve(ctXY.position,3);
-          break;
-        case 12: //Left-down turn.
-          addRoadCurve(ctXY.position,1);
-          break;
-        case 6: //Right-down turn.
-          addRoadCurve(ctXY.position,2);
-          break;
-        case 11: //Horizontal-up t-intersection.
-          addRoadT(ctXY.position,0);
-          break;
-        case 14: //Horizontal-down t intersection.
-          addRoadT(ctXY.position,2);
-          break;
-        case 13: //Vertical-left t intersection.
-          addRoadT(ctXY.position,1);
-          break;
-        case 7: //Vertical-right t-intersection.
-          addRoadT(ctXY.position,3);
-          break;
-        case 15: //Cross intersection.
-          addRoadCross(ctXY.position);
-          break; 
-        case 1: //Up dead end.
-          addRoadEnd(ctXY.position,0);
-          break;
-        case 2: //Right dead end.
-          addRoadEnd(ctXY.position,3);
-          break;
-        case 4: //Down dead end.
-          addRoadEnd(ctXY.position,2);
-          break;
-        case 8: //Left dead end.
-          addRoadEnd(ctXY.position,1);
-          break;
-        default:
-          ctXY.tileType=0;
+        ctXY.tileType=1;
+
+        //The object type indexes and directions for every type of road connection combination. In order the road connections (from 1) correspond to:
+        //No road, up dead end, right dead end, right-up turn, down dead end, vertical straight, right-down turn, vertical-right t-intersection, left dead end,
+        //left-up turn, horizontal straight, horizontal-up t-intersection, left-down turn, vertical-left t intersection, horizontal-down t intersection
+        //cross intersection.
+
+        let roadObjectIndices=[0,4,4,1,4,0,1,2,4,1,0,2,1,2,2,3];
+        let footpathObjectIndices=[0,9,9,6,9,5,6,7,9,6,5,7,6,7,7,8];
+        let directions=[0,0,3,3,2,1,2,3,1,0,0,0,1,1,2,0];
+
+      
+        let roadObjectIndex=roadObjectIndices[ctXY.roadConnections];
+        let footpathObjectIndex=footpathObjectIndices[ctXY.roadConnections];
+        let rotation=[0.0,0.0,HALF_PI*directions[ctXY.roadConnections]];
+        let scale=[0.5,0.0,0.0];
+
+        addObject(roadObjectIndex,ctXY.position,rotation,scale,roadColour,0);
+        addObject(footpathObjectIndex,ctXY.position,rotation,scale,footpathColour,0);
       }
     }
   }
@@ -303,8 +265,10 @@ function determineBuildingTiles()
 
 function getCityCentre()
 {
-  var cx=0.0,cy=0.0;
-  var roadPieceCount=0;
+  let cx,cy;
+  cx=cy=0.0;
+  let roadPieceCount=0;
+  
   for(let ctX of cityTiles)
   {
     for(let ctXY of ctX)
@@ -474,13 +438,10 @@ function buildBVH(objectList)
     var newCurrentNodesToPair=[];
     for(let i of nodePairs)
     {
-      var paired1=i[0].paired;
-      var paired2=i[1].paired;
-      if(!(paired1||paired2)) //If both nodes have not been paired yet, they are enclosed by and made children of a new node.
+      if(!((i[0].paired)||(i[1].paired))) //If both nodes have not been paired yet, they are enclosed by and made children of a new node.
       {
         newCurrentNodesToPair.push(new BvhNode(i[0],i[1],null));
-        i[0].paired=true;
-        i[1].paired=true;
+        i[0].paired=i[1].paired=true;
       }
     }
     
@@ -538,37 +499,6 @@ function vec3ToTexture(iX,iY,dataTexture,inputArray)
 function addObject(type,position,rotation,size,colour,material)
 {
   sceneObjects.push(new SceneObject(type,position,rotation,size,colour,material));
-}
-
-
-function addRoadStraight(position,direction)
-{
-  addObject(0,position,[0.0,0.0,HALF_PI*direction],[0.5,0.0,0.0],roadColour,0);
-  addObject(5,position,[0.0,0.0,HALF_PI*direction],[0.5,0.0,0.0],footpathColour,0);
-}
-
-function addRoadCurve(position,direction)
-{
-  addObject(1,position,[0.0,0.0,HALF_PI*direction],[0.5,0.0,0.0],roadColour,0);
-  addObject(6,position,[0.0,0.0,HALF_PI*direction],[0.5,0.0,0.0],footpathColour,0);
-}
-
-function addRoadT(position,direction)
-{
-  addObject(2,position,[0.0,0.0,HALF_PI*direction],[0.5,0.0,0.0],roadColour,0);
-  addObject(7,position,[0.0,0.0,HALF_PI*direction],[0.5,0.0,0.0],footpathColour,0);
-}
-
-function addRoadCross(position)
-{
-  addObject(3,position,[0.0,0.0,0.0],[0.5,0.0,0.0],roadColour,0);
-  addObject(8,position,[0.0,0.0,0.0],[0.5,0.0,0.0],footpathColour,0);
-}
-
-function addRoadEnd(position,direction)
-{
-  addObject(4,position,[0.0,0.0,HALF_PI*direction],[0.5,0.0,0.0],roadColour,0);
-  addObject(9,position,[0.0,0.0,HALF_PI*direction],[0.5,0.0,0.0],footpathColour,0);
 }
 
 function randomColour()
@@ -655,7 +585,7 @@ function setup()
   
   addObject(10,[0.0,0.0,0.0],[0.0,0.0,0.0],[0.0,0.0,0.0],randomColour(),0);
   
-  cityTiles=createTileGrid(tileCount,tileCount);
+  cityTiles=createTileGrid();
   var roadBuilderRules=[rSr1,rBlock];
   var roadBuilderRuleChances=[0.7,0.3];
   generateRoadLayout(5,roadBuilderRuleChances,roadBuilderRules);
@@ -689,6 +619,10 @@ function draw()
   
   renderingShader.setUniform("cameraLocation",cameraLocation);
   renderingShader.setUniform("cameraForward",[-1,1,-1]);
+
+  renderingShader.setUniform("sunRadius",20.0);
+  renderingShader.setUniform("sunI",0.75);
+  renderingShader.setUniform("skyI",0.1);
   renderingShader.setUniform("lightD",lightD);
   
   renderingShader.setUniform("objectCount",currentObjectIndex);
@@ -698,7 +632,6 @@ function draw()
   renderingShader.setUniform("bvhData",bvhData);
 
   
-  rect(0,0,width,height);  
-  
+  rect(0,0,width,height);    
   frameNumber+=1.0;
 }
