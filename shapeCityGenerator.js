@@ -6,8 +6,8 @@ var buildingChances=[0.6,0.1,0.02];
 var roadColour=[0.4,0.4,0.4];
 var footpathColour=[0.78,0.78,0.78];
 
-var rSr1=["ffo"];
-var rBlock=["llffffrrfo","llfflo","rrffro","rrffffll"];
+var rr1="ffo";
+var rr2="llfflorffrrfobrrbbrolbbll";
 
 var renderingShader=null;
 var canvas=null;
@@ -106,7 +106,7 @@ class RoadBuilder
     
     //Various directions relative to the starting tile and direction of the RoadBuilder.
     this.forwardDirection=this.startingDirection;
-    this.leftDirection=abs((this.startingDirection-1)%4);
+    this.leftDirection=(this.startingDirection+3)%4;
     this.rightDirection=(this.startingDirection+1)%4;
     this.backwardDirection=(this.startingDirection+2)%4;
   }
@@ -115,31 +115,29 @@ class RoadBuilder
   {
     var newRoadBuilders=[]; //Holds the new Roadbuilders that may be used in the next road building iteration.
     
-    for(let subrule of rule) //Each subrule starts relative to the starting tile.
+
+    let currentTile=this.startingTile;
+    let currentDirection=this.startingDirection;
+    for(let i of rule)
     {
-      var currentTile=this.startingTile;
-      var currentDirection=this.startingDirection;
-      for(let i of subrule)
+      if(i=="o") //If a new RoadBuilder is to be created.
       {
-        if(i=="o") //If a new RoadBuilder is to be created.
-        {
-          newRoadBuilders.push(new RoadBuilder(currentTile,currentDirection));
-          break;
-        }
-        
-        //A new road tile is joined to the current one and then the new road tile is made the current one.
-        let directions={"f":this.forwardDirection,"l":this.leftDirection,"r":this.rightDirection,"b":this.backwardDirection};
-        currentDirection=directions[i];
-        let newTile=currentTile.neighbours[currentDirection];
-        
-        if(newTile==edgeTile) //The road builder cannot continue any more.
-        {
-          break;
-        }
-        
-        newTile.joinRoadTile(currentTile);
-        currentTile=newTile;                
+        newRoadBuilders.push(new RoadBuilder(currentTile,currentDirection));
+        continue;
       }
+        
+      //A new road tile is joined to the current one and then the new road tile is made the current one.
+      let directions={"f":this.forwardDirection,"l":this.leftDirection,"r":this.rightDirection,"b":this.backwardDirection};
+      currentDirection=directions[i];
+      let newTile=currentTile.neighbours[currentDirection];
+        
+      if(newTile==edgeTile) //The road builder cannot continue any more.
+      {
+        break;
+      }
+        
+      newTile.joinRoadTile(currentTile);
+      currentTile=newTile;                
     }
     
     return newRoadBuilders;
@@ -549,27 +547,9 @@ function addBuilding(position,scale)
 
 function preload()
 {
-  //The p5.js renderer context creation function is modified to use WEBGL2. Idea to do this is from https://discourse.processing.org/t/use-webgl2-in-p5js/33695.
-  p5.RendererGL.prototype._initContext = function() {
-  try {
-    this.drawingContext =
-      this.canvas.getContext('webgl2', this._pInst._glAttributes);
-    if (this.drawingContext === null) {
-      throw new Error('Error creating webgl context');
-    } else {
-      const gl = this.drawingContext;
-      gl.enable(gl.DEPTH_TEST);
-      gl.depthFunc(gl.LEQUAL);
-      gl.viewport(0, 0, gl.drawingBufferWidth, gl.drawingBufferHeight);
-      this._viewport = this.drawingContext.getParameter(
-        this.drawingContext.VIEWPORT
-      );
-    }
-  } catch (er) {
-    throw er;
-  }
-};
-
+  //Alters the p5.js renderer context function to use WebGL2 by editing its text.
+  eval("p5.RendererGL.prototype._initContext="+p5.RendererGL.prototype._initContext.toString().replaceAll("\"webgl\"","\"webgl2\""));
+  
   renderingShader=loadShader("vertexShader.glsl","rendering.glsl");
 }
 
@@ -586,7 +566,7 @@ function setup()
   addObject(10,[0.0,0.0,0.0],[0.0,0.0,0.0],[0.0,0.0,0.0],randomColour(),0);
   
   cityTiles=createTileGrid();
-  var roadBuilderRules=[rSr1,rBlock];
+  var roadBuilderRules=[rr1,rr2];
   var roadBuilderRuleChances=[0.7,0.3];
   generateRoadLayout(5,roadBuilderRuleChances,roadBuilderRules);
   determineRoadTiles();
@@ -621,8 +601,8 @@ function draw()
   renderingShader.setUniform("cameraForward",[-1,1,-1]);
 
   renderingShader.setUniform("sunRadius",20.0);
-  renderingShader.setUniform("sunI",0.75);
-  renderingShader.setUniform("skyI",0.1);
+  renderingShader.setUniform("sunI",7.5);
+  renderingShader.setUniform("skyI",0.6);
   renderingShader.setUniform("lightD",lightD);
   
   renderingShader.setUniform("objectCount",currentObjectIndex);

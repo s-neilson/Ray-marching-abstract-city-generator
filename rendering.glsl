@@ -4,7 +4,6 @@ precision highp float;
 precision highp int;
 
 #define PI 3.14159
-#define SUN_RADIUS 20.0
 #define MAXIMUM_REFLECTIONS 3
 #define MAX_STACK_SIZE 14
 
@@ -443,11 +442,17 @@ void main()
   uX=uO.xyy,uY=uO.yxy,uZ=uO.yyx;
   vec2 screenFraction=gl_FragCoord.xy/resolution.xy;
 
+  float cosSunRadius=cos(sunRadius*(PI/180.0));
+  float sunSolidAngle=2.0*PI*(1.0-cosSunRadius);
+
   vec3 rayO=getOrthographicCameraRay(screenFraction,15.0); 
   vec3 rayD=normalize(cameraForward);
+  vec3 lightDU=normalize(lightD);
   
   vec3 accumulatedAttenuation=vec3(1.0); //Holds the light attenuation from the previous bounces in order to get the total contribution of the sun and sky reflecting off of the current object to the current pixel on the camera.
   vec3 outputColour=vec3(0.0); //The output colour of this pixel. Is initally set to black.
+  bool isDiffuseRay=false;
+
   for(int ri=0;ri<MAXIMUM_REFLECTIONS;ri++) //Loops over multiple reflections if needed.
   {
     int hitObjectIndex=0;
@@ -459,20 +464,21 @@ void main()
     int hitObjectMaterial=getIntFromTexture(objectData,hitObjectIndex,13);
 
 
-    if(hitObjectIndex<0) //If the ray does not hit anything, takes to many steps or has travelled too far it is assumed to hit the sky.
+    if(hitObjectIndex<0) //If the ray does not hit anything, takes to many steps or has travelled too far it is assumed to hit the sky or possibly the sun.
     {
-      outputColour+=accumulatedAttenuation*(2.0*PI)*(mix(vec3(0.31,0.59,1.0),vec3(0.0,0.4,1.0),rayD.z)*skyI);
+      //If the ray does not hit anything, takes to many steps or has travelled too far it is assumed to hit the sky or possibly the sun (in the case of coming from a
+      //non diffuse object as diffuse objects already sample the sun directly).
+      bool shouldHitSun=(!isDiffuseRay)&&(dot(rayD,lightDU)>cosSunRadius);
+      outputColour+=(accumulatedAttenuation*(shouldHitSun ? vec3(sunI):mix(vec3(0.31,0.59,1.0),vec3(0.0,0.4,1.0),rayD.z)*skyI));   
       break;
     } 
     
     rayO=hitPosition+(hitNormal*0.002); //Any new generated rays have their origin moved slightly above the hit location in the direction of the hit normal so they don't immediately collide with the object that was originally hit.
     
+    isDiffuseRay=false;
     if(hitObjectMaterial==MAT_DIFFUSE)
-    {
-      float sunSolidAngle=2.0*PI*(1.0-cos(sunRadius));
-
-      
-      vec3 randomLightVector=randomConeVector(hitPosition+vec3(frameNumber),normalize(lightD),(SUN_RADIUS*PI)/180.0); //A direction to a random point in the sun's disk.
+    {    
+      vec3 randomLightVector=randomConeVector(hitPosition+vec3(frameNumber),lightDU,(sunRadius*PI)/180.0); //A direction to a random point in the sun's disk.
       vec3 directAttenuationPerSa=(hitObjectColour/PI)*dot(hitNormal,randomLightVector); //Lambertian attenuation of the sun to the diffuse object of the current bounce.
       marchRay(rayO,randomLightVector,hitObjectIndex);   
       directAttenuationPerSa*=float(hitObjectIndex<0); //The sun contributes nothing in this bounce if the path to it is blocked by an object.
@@ -481,6 +487,7 @@ void main()
       rayD=randomConeVector(hitPosition+(vec3(frameNumber)*0.9),hitNormal,PI/2.0); //A random direction within a hemisphere centred on the surface normal for the next bounce.
       vec3 indirectAttenuationPerSa=(hitObjectColour/PI)*dot(hitNormal,rayD); //Lambertian attenuation of light from the next bounce to the current object.
       accumulatedAttenuation*=indirectAttenuationPerSa*(2.0*PI-sunSolidAngle); //The current attenuation is modified to include the new bounce.
+      isDiffuseRay=true;
     }
     else //The material is reflective and the colour is will be the colours of what the reflection ray hits.
     {
