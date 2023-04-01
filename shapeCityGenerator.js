@@ -341,18 +341,6 @@ class BvhNode //A spherical node in a ball-tree based bounding volume hierarchy.
       this.radius=halfSeperation+max(this.leftChild.radius,this.rightChild.radius); //The new node is large enough to enclose both children.
     }
     
-    
-    vec3ToTexture(this.index,0,bvhData,[this.position.x,this.position.y,this.position.z]);
-    bvhData.set(this.index,3,floatToColourArray(this.radius));
-    
-    var leftChildIndex=(this.leftChild) ? this.leftChild.index:-1;
-    var rightChildIndex=(this.rightChild) ? this.rightChild.index:-1;
-    bvhData.set(this.index,4,intToColourArray(leftChildIndex)); 
-    bvhData.set(this.index,5,intToColourArray(rightChildIndex));
-    
-    var leafObjectIndex=(this.leafObject) ? this.leafObject.index:-1;
-    bvhData.set(this.index,6,intToColourArray(leafObjectIndex));
-    
     currentBvhNodeIndex++;
   }
  
