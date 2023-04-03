@@ -170,7 +170,6 @@ function generateRoadLayout(numberOfIterations,ruleWeights,rules)
 function createTileGrid()
 {
   //The CityTiles are created in a grid.
-  var tileGrid=[];
   edgeTile=new CityTile();
   for(let x=0;x<tileCount;x++)
   {
@@ -180,7 +179,7 @@ function createTileGrid()
       var newCityTile=new CityTile();
       tileGridRow.push(newCityTile);
     }
-    tileGrid.push(tileGridRow);
+    cityTiles.push(tileGridRow);
   }
   
   //The neighbours for each tile are assigned.
@@ -190,17 +189,15 @@ function createTileGrid()
     {
       //The edges of the tile grid are made up of edge tiles that are not iterated over further on and
       //have no road connections or buildings on them.
-      var upNeighbour=((y==(tileCount-1)) ? edgeTile:tileGrid[x][y+1]);
-      var downNeighbour=((y==0) ? edgeTile:tileGrid[x][y-1]);
-      var leftNeighbour=((x==0) ? edgeTile:tileGrid[x-1][y]);
-      var rightNeighbour=((x==(tileCount-1)) ? edgeTile:tileGrid[x+1][y]);
+      var upNeighbour=((y==(tileCount-1)) ? edgeTile:cityTiles[x][y+1]);
+      var downNeighbour=((y==0) ? edgeTile:cityTiles[x][y-1]);
+      var leftNeighbour=((x==0) ? edgeTile:cityTiles[x-1][y]);
+      var rightNeighbour=((x==(tileCount-1)) ? edgeTile:cityTiles[x+1][y]);
       
-      tileGrid[x][y].neighbours=[upNeighbour,rightNeighbour,downNeighbour,leftNeighbour];
-      tileGrid[x][y].position=[(x+0.5)-(tileCount/2.0),(y+0.5)-(tileCount/2.0),0.0];
+      cityTiles[x][y].neighbours=[upNeighbour,rightNeighbour,downNeighbour,leftNeighbour];
+      cityTiles[x][y].position=[(x+0.5)-(tileCount/2.0),(y+0.5)-(tileCount/2.0),0.0];
     }
   }
-  
-  return tileGrid;
 }
 
 //Determines what sort of road piece should be placed on each city tile from its road neighbour connections.
@@ -301,12 +298,12 @@ class SceneObject
   addData()
   {
     this.index=currentObjectIndex;
-    objectData.set(this.index,0,intToColourArray(this.type));
+    objectData.set(this.index,0,numberToColourArray(this.type));
     vec3ToTexture(this.index,1,objectData,[this.position.x,this.position.y,this.position.z]);
     vec3ToTexture(this.index,4,objectData,this.rotation);
     vec3ToTexture(this.index,7,objectData,this.size);
     vec3ToTexture(this.index,10,objectData,this.colour);
-    objectData.set(this.index,13,intToColourArray(this.material));
+    objectData.set(this.index,13,numberToColourArray(this.material));
     currentObjectIndex++;
   }
 }
@@ -340,7 +337,7 @@ class BvhNode //A spherical node in a ball-tree based bounding volume hierarchy.
       var halfSeperation=this.leftChild.position.dist(this.position);
       this.radius=halfSeperation+max(this.leftChild.radius,this.rightChild.radius); //The new node is large enough to enclose both children.
     }
-    
+        
     currentBvhNodeIndex++;
   }
  
@@ -380,15 +377,15 @@ class BvhNode //A spherical node in a ball-tree based bounding volume hierarchy.
   writeToBvhTexture()
   {
     vec3ToTexture(this.index,0,bvhData,[this.position.x,this.position.y,this.position.z]);
-    bvhData.set(this.index,3,floatToColourArray(this.radius));
+    bvhData.set(this.index,3,numberToColourArray(this.radius));
     
     var nextNormalIndex=(this.nextNormal) ? this.nextNormal.index:-1;
     var nextSkipIndex=(this.nextSkip) ? this.nextSkip.index:-1;
-    bvhData.set(this.index,4,intToColourArray(nextNormalIndex)); 
-    bvhData.set(this.index,5,intToColourArray(nextSkipIndex));
+    bvhData.set(this.index,4,numberToColourArray(nextNormalIndex)); 
+    bvhData.set(this.index,5,numberToColourArray(nextSkipIndex));
     
     var leafObjectIndex=(this.leafObject) ? this.leafObject.index:-1;
-    bvhData.set(this.index,6,intToColourArray(leafObjectIndex));
+    bvhData.set(this.index,6,numberToColourArray(leafObjectIndex));
 
     if(!(this.leafObject))
     {
@@ -461,15 +458,9 @@ function nToB256(input)
   return result;
 }
 
-function floatToColourArray(input)
+function numberToColourArray(input)
 {
-  var remainingInput=(input+2000.0)*4096.0; //The input is shifted and scaled so a large range of floating point values between -2000 and 2000 can be stored. 
-  return nToB256(remainingInput);
-}
-
-function intToColourArray(input)
-{
-  var remainingInput=input+8388608;
+  var remainingInput=(input+4096.0)*1024.0; //The input is shifted and scaled so a large range of numbers between -4096 and 4096 can be stored. 
   return nToB256(remainingInput);
 }
 
@@ -477,7 +468,7 @@ function vec3ToTexture(iX,iY,dataTexture,inputArray)
 {
   for(let i=0;i<3;i++)
   {
-    dataTexture.set(iX,iY+i,floatToColourArray(inputArray[i]));
+    dataTexture.set(iX,iY+i,numberToColourArray(inputArray[i]));
   }
 }
 
@@ -553,7 +544,7 @@ function setup()
   
   addObject(10,[0.0,0.0,0.0],[0.0,0.0,0.0],[0.0,0.0,0.0],randomColour(),0);
   
-  cityTiles=createTileGrid();
+  createTileGrid();
   var roadBuilderRules=[rr1,rr2];
   var roadBuilderRuleChances=[0.7,0.3];
   generateRoadLayout(5,roadBuilderRuleChances,roadBuilderRules);

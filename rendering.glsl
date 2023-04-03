@@ -8,27 +8,8 @@ precision highp int;
 #define MAX_STACK_SIZE 14
 
 
-#define OBJ_ROADSTRAIGHT 0
-#define OBJ_ROADCURVE 1
-#define OBJ_ROADT 2
-#define OBJ_ROADCROSS 3
-#define OBJ_ROADEND 4
-#define OBJ_FOOTPATHSTRAIGHT 5
-#define OBJ_FOOTPATHCURVE 6
-#define OBJ_FOOTPATHT 7
-#define OBJ_FOOTPATHCROSS 8
-#define OBJ_FOOTPATHEND 9
-#define OBJ_PLANE 10
-#define OBJ_SPHERE 11
-#define OBJ_BOX 12
-#define OBJ_TORUS 13
-#define OBJ_CONE 14
-#define OBJ_OCTAHEDRON 15
-#define OBJ_TETRAHEDRON 16
-
 #define MAT_DIFFUSE 0
 #define MAT_REFLECT 1
-
 uniform vec2 resolution;
 uniform sampler2D currentScreen;
 uniform float frameNumber;
@@ -37,14 +18,14 @@ uniform vec3 cameraLocation,cameraForward;
 uniform float sunRadius,sunI,skyI;
 uniform vec3 lightD;
 
-uniform int objectCount;
 uniform sampler2D objectData;
 
 uniform int bvhNodeCount;
 uniform sampler2D bvhData;
 
+float randomSeed;
 int objectStack[MAX_STACK_SIZE];
-int objectStackPointer=-1;
+int objectStackPointer;
 
 //x,y and z unit vectors.
 vec2 uO=vec2(1.0,0.0);
@@ -190,23 +171,24 @@ float sdfFootpathEnd(vec3 ray)
   return min(straightSdf,curvedSdf);
 }
 
-//A pseudorandom number between minValue and maxValue based on the value of the vector "p".
-float randomNumber(vec3 seed,float minValue,float maxValue)
+//A pseudorandom number between minValue and maxValue based on the value of randomSeed.
+float randomNumber(float minValue,float maxValue)
 {
-  float random_0_1=fract(sin(dot(seed,vec3(157.0,-33.0,92.0)))*12000.0); //A random number between 0 and 1.
+  float random_0_1=fract(sin(randomSeed)*22000.0); //A random number between 0 and 1.
+  randomSeed+=0.7;
   return (random_0_1*(maxValue-minValue))+minValue;
 }
 
 //A random vector within the cone defined by the unit vector "n" and angular radius of "angle".
-vec3 randomConeVector(vec3 seed,vec3 n,float angle)
+vec3 randomConeVector(vec3 n,float angle)
 {
   //Including the "n" vector these make the basis vectors for the random vector.
   vec3 cBx=cross(n,vec3(0.796,0.239,-0.557));
   vec3 cBy=cross(n,cBx);
 
   //Uniformly randomly sampling on a cylinder and projecting to a sphere is the same as uniform random sampling on the sphere.
-  float randomAngle=randomNumber(seed+1.0,0.0,2.0*PI); //A random angle around the vector "n".
-  float cCn=randomNumber(seed,cos(angle),1.0); //The "n" vector component. Vertical distance on the unit sphere above angles less than "angle".
+  float randomAngle=randomNumber(0.0,2.0*PI); //A random angle around the vector "n".
+  float cCn=randomNumber(cos(angle),1.0); //The "n" vector component. Vertical distance on the unit sphere above angles less than "angle".
   float cCx=sqrt(1.0-(cCn*cCn))*sin(randomAngle);
   float cCy=sqrt(1.0-(cCn*cCn))*cos(randomAngle);
 
@@ -221,21 +203,17 @@ mat3 getRotationMatrix(vec3 angles)
   return mat3(C.z*C.y,(C.z*S.y*S.x)-(S.z*C.x),(C.z*S.y*C.x)+(S.z*S.x),S.z*C.y,(S.z*S.y*S.x)+(C.z*C.x),(S.z*S.y*C.x)-(C.z*S.x),(-1.0)*S.y,C.y*S.x,C.y*C.x);
 }
 
-float getRawPackedFromTexture(sampler2D inputTexture,int iX,int iY)
-{
-  vec4 textureData=255.0*texelFetch(inputTexture,ivec2(iX,iY),0);
-  return dot(floor(textureData+0.5),vec4(1.0,256.0,65536.0,0.0));
-}
 
 float getFloatFromTexture(sampler2D inputTexture,int iX,int iY)
 {
-  return (getRawPackedFromTexture(inputTexture,iX,iY)/4096.0)-2000.0;
+  vec4 textureData=255.0*texelFetch(inputTexture,ivec2(iX,iY),0);
+  float rawData=dot(floor(textureData+0.5),vec4(1.0,256.0,65536.0,0.0));
+  return (rawData/1024.0)-4096.0;
 }
 
 int getIntFromTexture(sampler2D inputTexture,int iX,int iY)
 {
-  float shiftedRawValue=getRawPackedFromTexture(inputTexture,iX,iY)-8388608.0;
-  return int(floor(shiftedRawValue+0.5));
+  return int(floor(getFloatFromTexture(inputTexture,iX,iY)+0.5)); 
 }
 
 vec3 getVec3FromTexture(sampler2D inputTexture,int iX,int iY)
@@ -248,8 +226,8 @@ void push(int value)
 {
   if(objectStackPointer<MAX_STACK_SIZE) //Prevents the stack from overflowing.
   {
-    objectStackPointer+=1;
     objectStack[objectStackPointer]=value;
+    objectStackPointer+=1;
   }
 }
 
@@ -269,39 +247,39 @@ float objectSdf(vec3 ray,int objectIndex)
 
   switch(currentObjectType)
   {
-    case OBJ_PLANE:
+    case 10:
       return sdfPlane(transformedRay);    
-    case OBJ_ROADSTRAIGHT:
+    case 0:
       return sdfRoadStraight(transformedRay);
-    case OBJ_ROADCURVE:
+    case 1:
       return sdfRoadCurve(transformedRay);
-    case OBJ_ROADT:
+    case 2:
       return sdfRoadT(transformedRay);
-    case OBJ_ROADCROSS:
+    case 3:
       return sdfRoadCross(transformedRay);
-    case OBJ_ROADEND:
+    case 4:
       return sdfRoadEnd(transformedRay);
-    case OBJ_FOOTPATHSTRAIGHT:
+    case 5:
       return sdfFootpathStraight(transformedRay);
-    case OBJ_FOOTPATHCURVE:
+    case 6:
       return sdfFootpathCurve(transformedRay);
-    case OBJ_FOOTPATHT:
+    case 7:
       return sdfFootpathT(transformedRay);
-    case OBJ_FOOTPATHCROSS:
+    case 8:
       return sdfFootpathCross(transformedRay);
-    case OBJ_FOOTPATHEND:
+    case 9:
       return sdfFootpathEnd(transformedRay);
-    case OBJ_SPHERE:
+    case 11:
       return sdfSphere(transformedRay,currentObjectSize[0]);
-    case OBJ_BOX:
+    case 12:
       return sdfBox(transformedRay,currentObjectSize);
-    case OBJ_TORUS:
+    case 13:
       return sdfTorus(transformedRay,currentObjectSize[0],currentObjectSize[1]);
-    case OBJ_CONE:
+    case 14:
       return sdfCone(transformedRay,currentObjectSize[0],currentObjectSize[1]);
-    case OBJ_OCTAHEDRON:
+    case 15:
       return sdfOctahedron(transformedRay,currentObjectSize[0]);
-    case OBJ_TETRAHEDRON:
+    case 16:
       return sdfTetrahedron(transformedRay,currentObjectSize[0]);
   }
 }
@@ -326,7 +304,6 @@ bool rayIntersectsBvhNode(vec3 rayO,vec3 rayD,int bvhNodeIndex)
 
 void exploreBvh(vec3 ray,vec3 rayD) //Gets the only objects in the scene that the ray could possibly hit. Only the SDFs of these objects are evaluated.
 {
-
   int currentNodeIndex=bvhNodeCount-1; //The root node is added for exploration.
   push(0); //The ground's SDF is always calculated.
   
@@ -359,7 +336,7 @@ float totalSdf(vec3 ray,out int closestObjectIndex)
 {
   float closestObjectDistance=9999.8;
 
-  for(int i=objectStackPointer;i>=0;i--) //Loops over all objects in the object stack to find the closest to the vector "ray".
+  for(int i=0;i<objectStackPointer;i++) //Loops over all objects in the object stack to find the closest to the vector "ray".
   {
     int objectIndex=objectStack[i];
     float currentObjectDistance=objectSdf(ray,objectIndex);
@@ -394,7 +371,7 @@ vec3 marchRay(in vec3 rayO,vec3 rayD,out int hitObjectIndex)
   hitObjectIndex=-1; //The default value of negative 1 means that the ray has either gone too far or taken too many iterations to march.
   vec3 ray=rayO;
   
-  objectStackPointer=-1;
+  objectStackPointer=0;
   exploreBvh(ray,rayD);
   
   for(int i=0;;i++)
@@ -441,6 +418,7 @@ void main()
 {
   uX=uO.xyy,uY=uO.yxy,uZ=uO.yyx;
   vec2 screenFraction=gl_FragCoord.xy/resolution.xy;
+  randomSeed=dot(vec3(screenFraction,frameNumber),vec3(1500.0,-3300.0,19.2)); //Creates a unique set of random numbers for each pixel coordinate and frame number.
 
   float cosSunRadius=cos(sunRadius*(PI/180.0));
   float sunSolidAngle=2.0*PI*(1.0-cosSunRadius);
@@ -457,6 +435,16 @@ void main()
   {
     int hitObjectIndex=0;
     vec3 hitPosition=marchRay(rayO,rayD,hitObjectIndex);
+
+    if(hitObjectIndex<0) //If the ray does not hit anything, takes to many steps or has travelled too far it is assumed to hit the sky or possibly the sun.
+    {
+      //If the ray does not hit anything, takes to many steps or has travelled too far it is assumed to hit the sky or possibly the sun (in the case of coming from a
+      //non diffuse object as diffuse objects already sample the sun directly).
+      bool shouldHitSun=(!isDiffuseRay)&&(dot(rayD,lightDU)>cosSunRadius);
+      outputColour+=(accumulatedAttenuation*(shouldHitSun ? vec3(sunI):mix(vec3(0.31,0.59,1.0),vec3(0.0,0.4,1.0),rayD.z)*skyI));
+      break;
+    }
+
     vec3 hitNormal=calculateNormal(hitPosition,hitObjectIndex);
 
     //The colour and material of the hit object is determined.
@@ -464,27 +452,20 @@ void main()
     int hitObjectMaterial=getIntFromTexture(objectData,hitObjectIndex,13);
 
 
-    if(hitObjectIndex<0) //If the ray does not hit anything, takes to many steps or has travelled too far it is assumed to hit the sky or possibly the sun.
-    {
-      //If the ray does not hit anything, takes to many steps or has travelled too far it is assumed to hit the sky or possibly the sun (in the case of coming from a
-      //non diffuse object as diffuse objects already sample the sun directly).
-      bool shouldHitSun=(!isDiffuseRay)&&(dot(rayD,lightDU)>cosSunRadius);
-      outputColour+=(accumulatedAttenuation*(shouldHitSun ? vec3(sunI):mix(vec3(0.31,0.59,1.0),vec3(0.0,0.4,1.0),rayD.z)*skyI));   
-      break;
-    } 
+
     
     rayO=hitPosition+(hitNormal*0.002); //Any new generated rays have their origin moved slightly above the hit location in the direction of the hit normal so they don't immediately collide with the object that was originally hit.
     
     isDiffuseRay=false;
     if(hitObjectMaterial==MAT_DIFFUSE)
     {    
-      vec3 randomLightVector=randomConeVector(hitPosition+vec3(frameNumber),lightDU,(sunRadius*PI)/180.0); //A direction to a random point in the sun's disk.
+      vec3 randomLightVector=randomConeVector(lightDU,(sunRadius*PI)/180.0); //A direction to a random point in the sun's disk.
       vec3 directAttenuationPerSa=(hitObjectColour/PI)*dot(hitNormal,randomLightVector); //Lambertian attenuation of the sun to the diffuse object of the current bounce.
       marchRay(rayO,randomLightVector,hitObjectIndex);   
       directAttenuationPerSa*=float(hitObjectIndex<0); //The sun contributes nothing in this bounce if the path to it is blocked by an object.
       
       outputColour+=accumulatedAttenuation*sunSolidAngle*(directAttenuationPerSa*vec3(sunI)); //The contribution of the sun's light bouncing off this object is attenuated by the previous light bounces and then added to the total.
-      rayD=randomConeVector(hitPosition+(vec3(frameNumber)*0.9),hitNormal,PI/2.0); //A random direction within a hemisphere centred on the surface normal for the next bounce.
+      rayD=randomConeVector(hitNormal,PI/2.0); //A random direction within a hemisphere centred on the surface normal for the next bounce.
       vec3 indirectAttenuationPerSa=(hitObjectColour/PI)*dot(hitNormal,rayD); //Lambertian attenuation of light from the next bounce to the current object.
       accumulatedAttenuation*=indirectAttenuationPerSa*(2.0*PI-sunSolidAngle); //The current attenuation is modified to include the new bounce.
       isDiffuseRay=true;
