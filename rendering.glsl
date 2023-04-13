@@ -4,12 +4,10 @@ precision highp float;
 precision highp int;
 
 #define PI 3.14159
-#define MAXIMUM_REFLECTIONS 3
+#define MAXIMUM_PATH_LENGTH 8
 #define MAX_STACK_SIZE 14
 
 
-#define MAT_DIFFUSE 0
-#define MAT_REFLECT 1
 uniform vec2 resolution;
 uniform sampler2D currentScreen;
 uniform float frameNumber;
@@ -240,7 +238,7 @@ float objectSdf(vec3 ray,int objectIndex)
   vec3 currentObjectRotation=getVec3FromTexture(objectData,objectIndex,4);
   vec3 currentObjectSize=getVec3FromTexture(objectData,objectIndex,7);
 
-  vec3 transformedRay=ray-currentObjectPosition; //Shifts the ray to the objects frame of reference.
+  vec3 transformedRay=ray-currentObjectPosition; //Shifts the ray to the object's frame of reference.
 
   transformedRay=getRotationMatrix(currentObjectRotation)*(transformedRay); //Rotates the ray in the object's frame of reference.
   float currentObjectDistance=9999.9;
@@ -332,7 +330,7 @@ void exploreBvh(vec3 ray,vec3 rayD) //Gets the only objects in the scene that th
 }
 
 
-float totalSdf(vec3 ray,out int closestObjectIndex)
+float totalSdf(vec3 ray,out int closestObjectIndex,int insideObjectIndex)
 {
   float closestObjectDistance=9999.8;
 
@@ -340,6 +338,7 @@ float totalSdf(vec3 ray,out int closestObjectIndex)
   {
     int objectIndex=objectStack[i];
     float currentObjectDistance=objectSdf(ray,objectIndex);
+    currentObjectDistance*=(objectIndex==insideObjectIndex) ? -1.0:1.0; //The SDF of an object is flipped if a ray is refracting inside it.
 
     if(currentObjectDistance<closestObjectDistance) //If the current object is now the closest found so far.
     {
@@ -366,7 +365,7 @@ vec3 calculateNormal(vec3 p,int hitObjectIndex)
 
 //Determines which object (if any) a ray begining at rayO with a direction of rayD will hit using
 //the ray marching algorithm.
-vec3 marchRay(in vec3 rayO,vec3 rayD,out int hitObjectIndex)
+vec3 marchRay(in vec3 rayO,vec3 rayD,out int hitObjectIndex,int insideObjectIndex,out float marchDistance)
 {
   hitObjectIndex=-1; //The default value of negative 1 means that the ray has either gone too far or taken too many iterations to march.
   vec3 ray=rayO;
@@ -376,14 +375,14 @@ vec3 marchRay(in vec3 rayO,vec3 rayD,out int hitObjectIndex)
   
   for(int i=0;;i++)
   {
-    float marchDistance=length(ray-rayO);
+    marchDistance=length(ray-rayO);
     if((i>300)||(marchDistance>1000.0)) //A maximum of 300 marching steps or 1000 distance.
     {
       break;
     }
     
     int closestObjectIndex=0;
-    float closestDistance=totalSdf(ray,closestObjectIndex);
+    float closestDistance=totalSdf(ray,closestObjectIndex,insideObjectIndex);
 
     if(closestDistance<0.001) //If ray is within 0.001 if the closest object, it is considered to have hit it.
     {
@@ -412,6 +411,19 @@ vec3 getOrthographicCameraRay(vec2 screenFraction,float cameraScreenSize)
   return cameraLocation+cameraPixelLocation;
 }
 
+//The fraction of light reflected at a refracting interface.
+float frenselFactor(vec3 normal,vec3 i,float n1,float n2)
+{
+  float r0=pow((n1-n2)/(n1+n2),2.0); //Light reflected at incident light vector equalling surface normal.
+  float cosA=dot(normal,-i);
+  
+
+  //If total internal reflection is occuring, all light is reflected at the interface.
+  float sin2oA=pow(n1/n2,2.0)*(1.0-pow(cosA,2.0));
+  bool tir=1.0-pow(sin2oA,2.0)<0.0;
+  return (tir) ? 1.0:r0+((1.0-r0)*pow(1.0-cosA,5.0));
+}
+
 
 out vec4 fragColour;
 void main()
@@ -430,11 +442,14 @@ void main()
   vec3 accumulatedAttenuation=vec3(1.0); //Holds the light attenuation from the previous bounces in order to get the total contribution of the sun and sky reflecting off of the current object to the current pixel on the camera.
   vec3 outputColour=vec3(0.0); //The output colour of this pixel. Is initally set to black.
   bool isDiffuseRay=false;
+  bool isRefractingRay=false; //Whether the current bounce is inside a refracting object.
+  int insideObjectIndex=-99;
+  float marchDistance;
 
-  for(int ri=0;ri<MAXIMUM_REFLECTIONS;ri++) //Loops over multiple reflections if needed.
+  for(int ri=0;ri<MAXIMUM_PATH_LENGTH;ri++) //Loops over multiple reflections if needed.
   {
     int hitObjectIndex=0;
-    vec3 hitPosition=marchRay(rayO,rayD,hitObjectIndex);
+    vec3 hitPosition=marchRay(rayO,rayD,hitObjectIndex,insideObjectIndex,marchDistance);
 
     if(hitObjectIndex<0) //If the ray does not hit anything, takes to many steps or has travelled too far it is assumed to hit the sky or possibly the sun.
     {
@@ -446,34 +461,62 @@ void main()
     }
 
     vec3 hitNormal=calculateNormal(hitPosition,hitObjectIndex);
-
-    //The colour and material of the hit object is determined.
-    vec3 hitObjectColour=getVec3FromTexture(objectData,hitObjectIndex,10); 
-    int hitObjectMaterial=getIntFromTexture(objectData,hitObjectIndex,13);
+    hitNormal*=(hitObjectIndex==insideObjectIndex) ? -1.0:1.0; //While a ray is refracting inside an object the normal is flipped.
 
 
-
+    //The surface features of the hit object is determined.
+    vec3 hitObjectColour=getVec3FromTexture(objectData,hitObjectIndex,10);
+    float hitObjectDiffuseness=getFloatFromTexture(objectData,hitObjectIndex,13);
+    float hitObjectRoughness=getFloatFromTexture(objectData,hitObjectIndex,14);
+    float hitObjectRefractiveIndex=getFloatFromTexture(objectData,hitObjectIndex,15);
     
-    rayO=hitPosition+(hitNormal*0.002); //Any new generated rays have their origin moved slightly above the hit location in the direction of the hit normal so they don't immediately collide with the object that was originally hit.
     
-    isDiffuseRay=false;
-    if(hitObjectMaterial==MAT_DIFFUSE)
-    {    
-      vec3 randomLightVector=randomConeVector(lightDU,(sunRadius*PI)/180.0); //A direction to a random point in the sun's disk.
-      vec3 directAttenuationPerSa=(hitObjectColour/PI)*dot(hitNormal,randomLightVector); //Lambertian attenuation of the sun to the diffuse object of the current bounce.
-      marchRay(rayO,randomLightVector,hitObjectIndex);   
-      directAttenuationPerSa*=float(hitObjectIndex<0); //The sun contributes nothing in this bounce if the path to it is blocked by an object.
       
+           
+    
+    rayO=hitPosition+(hitNormal*0.002); //Any new non refracting rays have their origin moved slightly above the hit location in the direction of the hit normal so they don't immediately collide with the object that was originally hit.
+    isDiffuseRay=false;
+    bool makeDiffuseRay=randomNumber(0.0,1.0)<hitObjectDiffuseness; //A choice is made whether to to a diffuse or a refractive ray.
+    accumulatedAttenuation*=(makeDiffuseRay) ? hitObjectDiffuseness:1.0-hitObjectDiffuseness; //The attenuation for this bounce is weighted by the probability of the ray being diffuse or refractive/reflective.
+
+    if(makeDiffuseRay)
+    {
+     
+      vec3 randomLightVector=randomConeVector(lightDU,(sunRadius*PI)/180.0); //A direction to a random point in the sun's disk.
+      marchRay(rayO,randomLightVector,hitObjectIndex,-99,marchDistance);
+      vec3 directAttenuationPerSa=(hitObjectColour/PI)*dot(hitNormal,randomLightVector)*float(hitObjectIndex<0); //Lambertian attenuation of the sun to the diffuse object of the current bounce. Equals zero if the path to the sun is blocked by an object.      
       outputColour+=accumulatedAttenuation*sunSolidAngle*(directAttenuationPerSa*vec3(sunI)); //The contribution of the sun's light bouncing off this object is attenuated by the previous light bounces and then added to the total.
+
       rayD=randomConeVector(hitNormal,PI/2.0); //A random direction within a hemisphere centred on the surface normal for the next bounce.
       vec3 indirectAttenuationPerSa=(hitObjectColour/PI)*dot(hitNormal,rayD); //Lambertian attenuation of light from the next bounce to the current object.
       accumulatedAttenuation*=indirectAttenuationPerSa*(2.0*PI-sunSolidAngle); //The current attenuation is modified to include the new bounce.
       isDiffuseRay=true;
     }
-    else //The material is reflective and the colour is will be the colours of what the reflection ray hits.
+    else //Refractive and reflective rays.
     {
       vec3 hitReflect=reflect(rayD,hitNormal);
-      rayD=hitReflect; //The ray direction is updated.
+      float n1=isRefractingRay ? hitObjectRefractiveIndex:1.0; //The refractive index ratio depends if the ray is inside or outside the refracting object.
+      float n2=isRefractingRay ? 1.0:hitObjectRefractiveIndex;
+      vec3 hitRefract=refract(rayD,hitNormal,n1/n2);
+      
+      float reflectionFraction=frenselFactor(hitNormal,rayD,n1,n2);
+      bool willReflect=randomNumber(0.0,1.0)<reflectionFraction; //It is randomly chosen whether the ray in this bounce will reflect or refract; the contribution from both will build up over time.
+      accumulatedAttenuation*=(isRefractingRay) ? (1.0-reflectionFraction)*exp(vec3(marchDistance*(-0.2))/hitObjectColour):vec3(1.0); //The light is attenuated by the last ray passing through a refracting object using the Beer-Lambert law.
+
+      rayD=willReflect ? hitReflect:hitRefract;
+      rayD=randomConeVector(rayD,hitObjectRoughness); //The refracting or reflecting vector is perturbed to simulate frosted glass.
+
+      if(!willReflect)
+      {
+        rayO=hitPosition-(hitNormal*0.004); //If refracting, the ray origin is positioned inside the hit object.
+      }
+      else
+      {
+        accumulatedAttenuation*=(hitObjectColour*reflectionFraction); //The light in this bounce is attenuated by the choice on reflection.
+      }
+      
+      isRefractingRay=!(isRefractingRay^^willReflect); 
+      insideObjectIndex=isRefractingRay ? hitObjectIndex:-99;
     }
   }
 

@@ -226,8 +226,8 @@ function determineRoadTiles()
         let rotation=[0.0,0.0,HALF_PI*directions[ctXY.roadConnections]];
         let scale=[0.5,0.0,0.0];
 
-        addObject(roadObjectIndex,ctXY.position,rotation,scale,roadColour,0);
-        addObject(footpathObjectIndex,ctXY.position,rotation,scale,footpathColour,0);
+        addObject(roadObjectIndex,ctXY.position,rotation,scale,roadColour,1.0,0.0,1.0);
+        addObject(footpathObjectIndex,ctXY.position,rotation,scale,footpathColour,1.0,0.0,1.0);
       }
     }
   }
@@ -284,14 +284,16 @@ function getCityCentre()
 
 class SceneObject
 {
-  constructor(type,position,rotation,size,colour,material)
+  constructor(type,position,rotation,size,colour,diffuseness,roughness,refractiveIndex)
   {
     this.type=type;
     this.position=createVector(...position);
     this.rotation=rotation;
     this.size=size;
     this.colour=colour;
-    this.material=material;
+    this.diffuseness=diffuseness;
+    this.roughness=roughness;
+    this.refractiveIndex=refractiveIndex;
     this.addData();
   }
   
@@ -303,7 +305,9 @@ class SceneObject
     vec3ToTexture(this.index,4,objectData,this.rotation);
     vec3ToTexture(this.index,7,objectData,this.size);
     vec3ToTexture(this.index,10,objectData,this.colour);
-    objectData.set(this.index,13,numberToColourArray(this.material));
+    objectData.set(this.index,13,numberToColourArray(this.diffuseness));
+    objectData.set(this.index,14,numberToColourArray(this.roughness));
+    objectData.set(this.index,15,numberToColourArray(this.refractiveIndex));
     currentObjectIndex++;
   }
 }
@@ -403,7 +407,7 @@ function buildBVH(objectList)
     currentNodesToPair.push(new BvhNode(null,null,i));
   }
   
-  while(currentNodesToPair.length>1) //While the root node has not been created. Loops through all levels in the highrarchy.
+  while(currentNodesToPair.length>1) //While the root node has not been created. Loops through all levels in the hierarchy.
   {
     let nodePairs=[];
     for(let i of currentNodesToPair) //Determines the separation between every node pair.
@@ -428,7 +432,7 @@ function buildBVH(objectList)
       }
     }
     
-    for(let i of currentNodesToPair) //If currentNodesToPair has an odd number of nodes then one will be unpaired; it is added to be paired i the next level of the highrarchy.
+    for(let i of currentNodesToPair) //If currentNodesToPair has an odd number of nodes then one will be unpaired; it is added to be paired in the next level of the hierarchy.
     {
       if(!(i.paired))
       {
@@ -473,9 +477,9 @@ function vec3ToTexture(iX,iY,dataTexture,inputArray)
 }
 
 
-function addObject(type,position,rotation,size,colour,material)
+function addObject(type,position,rotation,size,colour,diffuseness,roughness,refractiveIndex)
 {
-  sceneObjects.push(new SceneObject(type,position,rotation,size,colour,material));
+  sceneObjects.push(new SceneObject(type,position,rotation,size,colour,diffuseness,roughness,refractiveIndex));
 }
 
 function randomColour()
@@ -492,7 +496,9 @@ function addBuilding(position,scale)
   var rotation=[random(TWO_PI),random(TWO_PI),random(TWO_PI)];
   var buildingType=weightedChoose([1.0,1.0,1.0,1.0,1.0,1.0],[11,12,13,14,15,16]);
   var size=[];
-  var material=weightedChoose([0.95,0.05],[0,1]);
+  var diffuseness=weightedChoose([0.6,0.35,0.05],[1.0,0.2,0.0]);
+  var roughness=weightedChoose([0.7,0.2,0.1],[0.0,0.5,1.0]);
+  var refractiveIndex=weightedChoose([0.8,0.15,0.05],[100.0,1.5,1.05]);
   
   switch(buildingType)
   {
@@ -520,14 +526,14 @@ function addBuilding(position,scale)
       break;
   }
 
-  addObject(buildingType,[position[0],position[1],scale*0.75],rotation,size,colour,material);
+  addObject(buildingType,[position[0],position[1],scale*0.75],rotation,size,colour,diffuseness,roughness,refractiveIndex);
 }
 
 
 function preload()
 {
-  //Alters the p5.js renderer context function to use WebGL2 by editing its text.
-  eval("p5.RendererGL.prototype._initContext="+p5.RendererGL.prototype._initContext.toString().replaceAll("\"webgl\"","\"webgl2\""));
+  //Alters the p5.js renderer context function to use WebGL2.
+  p5.RendererGL.prototype._initContext=function(){this.drawingContext=this.canvas.getContext('webgl2',this._pInst._glAttributes);};
   
   renderingShader=loadShader("vertexShader.glsl","rendering.glsl");
 }
@@ -535,14 +541,14 @@ function preload()
 
 function setup() 
 { 
-  objectData=createImage(4096,14);  
+  objectData=createImage(4096,16);  
   bvhData=createImage(4096,7);
   
   objectData.loadPixels();  
   bvhData.loadPixels();
 
   
-  addObject(10,[0.0,0.0,0.0],[0.0,0.0,0.0],[0.0,0.0,0.0],randomColour(),0);
+  addObject(10,[0.0,0.0,0.0],[0.0,0.0,0.0],[0.0,0.0,0.0],randomColour(),1.0,0.0,1.0);
   
   createTileGrid();
   var roadBuilderRules=[rr1,rr2];
@@ -584,7 +590,6 @@ function draw()
   renderingShader.setUniform("skyI",0.6);
   renderingShader.setUniform("lightD",lightD);
   
-  renderingShader.setUniform("objectCount",currentObjectIndex);
   renderingShader.setUniform("objectData",objectData);
   
   renderingShader.setUniform("bvhNodeCount",currentBvhNodeIndex);
