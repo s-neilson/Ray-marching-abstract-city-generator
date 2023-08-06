@@ -211,18 +211,16 @@ function determineRoadTiles()
       {
         ctXY.tileType=1;
 
-        //The object type indexes and directions for every type of road connection combination. In order the road connections (from 1) correspond to:
+        //The object type indexes and directions for every type of road connection combination. In order the road connections correspond to:
         //No road, up dead end, right dead end, right-up turn, down dead end, vertical straight, right-down turn, vertical-right t-intersection, left dead end,
         //left-up turn, horizontal straight, horizontal-up t-intersection, left-down turn, vertical-left t intersection, horizontal-down t intersection
         //cross intersection.
 
         let roadObjectIndices=[0,4,4,1,4,0,1,2,4,1,0,2,1,2,2,3];
-        let footpathObjectIndices=[0,9,9,6,9,5,6,7,9,6,5,7,6,7,7,8];
         let directions=[0,0,3,3,2,1,2,3,1,0,0,0,1,1,2,0];
-
       
         let roadObjectIndex=roadObjectIndices[ctXY.roadConnections];
-        let footpathObjectIndex=footpathObjectIndices[ctXY.roadConnections];
+        let footpathObjectIndex=roadObjectIndex+5
         let rotation=[0.0,0.0,HALF_PI*directions[ctXY.roadConnections]];
         let scale=[0.5,0.0,0.0];
 
@@ -499,32 +497,20 @@ function addBuilding(position,scale)
   var diffuseness=weightedChoose([0.6,0.35,0.05],[1.0,0.2,0.0]);
   var roughness=weightedChoose([0.7,0.2,0.1],[0.0,0.5,1.0]);
   var refractiveIndex=weightedChoose([0.8,0.15,0.05],[100.0,1.5,1.05]);
+
   
-  switch(buildingType)
+  size=[scale*random(0.35,0.45),scale*random(0.35,0.45),scale*random(0.35,0.45)];
+
+  if(buildingType==13)
   {
-    case 11:
-      size=[scale*random(0.35,0.45),0.0,0.0];
-      break;
-    case 12:
-      size=[scale*random(0.35,0.45),scale*random(0.35,0.45),scale*random(0.35,0.45)];
-      break;
-    case 13:
-      var r1=random(0.35,0.45);
-      var r2=random(0.1,0.9)*r1;
-      size=[scale*r1,scale*r2,0.0];
-      break;
-    case 14:
-      var r=random(0.35,0.45);
-      var h=random(0.7,0.9);
-      size=[scale*r,scale*h,0.0];
-      break;
-    case 15:
-      size=[scale*random(0.35,0.45),0.0,0.0];
-      break;
-    case 16:
-      size=[scale*random(0.35,0.45),0.0,0.0];
-      break;
+    size[1]=size[0]*random(0.1,0.9);
   }
+
+  if(buildingType==14)
+  {
+    size[1]*=2.0;
+  }
+  
 
   addObject(buildingType,[position[0],position[1],scale*0.75],rotation,size,colour,diffuseness,roughness,refractiveIndex);
 }
