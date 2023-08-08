@@ -203,6 +203,10 @@ function createTileGrid()
 //Determines what sort of road piece should be placed on each city tile from its road neighbour connections.
 function determineRoadTiles()
 {
+  let cx,cy;
+  cx=cy=0.0;
+  let roadPieceCount=0;
+  
   for(let ctX of cityTiles)
   {
     for(let ctXY of ctX)
@@ -226,9 +230,17 @@ function determineRoadTiles()
 
         addObject(roadObjectIndex,ctXY.position,rotation,scale,roadColour,1.0,0.0,1.0);
         addObject(footpathObjectIndex,ctXY.position,rotation,scale,footpathColour,1.0,0.0,1.0);
+        
+        roadPieceCount++;
+        cx+=ctXY.position[0];
+        cy+=ctXY.position[1];
       }
     }
   }
+  
+  cx/=roadPieceCount;
+  cy/=roadPieceCount;
+  return [cx,cy];
 }
 
 //Attempts to places buildings from largest to smallest with certain probabilities.
@@ -254,30 +266,6 @@ function determineBuildingTiles()
       }
     }
   }
-}
-
-function getCityCentre()
-{
-  let cx,cy;
-  cx=cy=0.0;
-  let roadPieceCount=0;
-  
-  for(let ctX of cityTiles)
-  {
-    for(let ctXY of ctX)
-    {
-      if(ctXY.tileType==1)
-      {
-        roadPieceCount++;
-        cx+=ctXY.position[0];
-        cy+=ctXY.position[1];
-      }
-    }
-  }
-  
-  cx/=roadPieceCount;
-  cy/=roadPieceCount;
-  return [cx,cy];
 }
 
 class SceneObject
