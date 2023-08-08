@@ -528,7 +528,7 @@ function setup()
   var roadBuilderRules=[rr1,rr2];
   var roadBuilderRuleChances=[0.7,0.3];
   generateRoadLayout(5,roadBuilderRuleChances,roadBuilderRules);
-  determineRoadTiles();
+  cityCentre=determineRoadTiles();
   determineBuildingTiles();
   
   objectData.updatePixels();
@@ -538,7 +538,6 @@ function setup()
   rootNode.writeToBvhTexture();
   bvhData.updatePixels();
 
-  cityCentre=getCityCentre();
   cameraLocation=[cityCentre[0]+150.0,cityCentre[1]-150.0,150.0];
   lightD=[random(-1.0,1.0),random(-1.0,1.0),random(0.1,1.0)]; 
   
