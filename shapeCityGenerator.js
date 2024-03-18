@@ -287,7 +287,7 @@ class SceneObject
   {
     this.index=currentObjectIndex;
     objectData.set(this.index,0,numberToColourArray(this.type));
-    vec3ToTexture(this.index,1,objectData,[this.position.x,this.position.y,this.position.z]);
+    vec3ToTexture(this.index,1,objectData,this.position.array());
     vec3ToTexture(this.index,4,objectData,this.rotation);
     vec3ToTexture(this.index,7,objectData,this.size);
     vec3ToTexture(this.index,10,objectData,this.colour);
@@ -366,7 +366,7 @@ class BvhNode //A spherical node in a ball-tree based bounding volume hierarchy.
   
   writeToBvhTexture()
   {
-    vec3ToTexture(this.index,0,bvhData,[this.position.x,this.position.y,this.position.z]);
+    vec3ToTexture(this.index,0,bvhData,this.position.array());
     bvhData.set(this.index,3,numberToColourArray(this.radius));
     
     var nextNormalIndex=(this.nextNormal) ? this.nextNormal.index:-1;
@@ -539,7 +539,7 @@ function setup()
   bvhData.updatePixels();
 
   cameraLocation=[cityCentre[0]+150.0,cityCentre[1]-150.0,150.0];
-  lightD=[random(-1.0,1.0),random(-1.0,1.0),random(0.1,1.0)]; 
+  lightD=p5.Vector.fromAngles(random(0.0,HALF_PI),random(0.0,TWO_PI)).array(); 
   
   canvas=createCanvas(windowWidth,windowHeight,WEBGL);
   pixelDensity(1);

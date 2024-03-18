@@ -437,7 +437,7 @@ void main()
 
   vec3 rayO=getOrthographicCameraRay(screenFraction,15.0); 
   vec3 rayD=normalize(cameraForward);
-  vec3 lightDU=normalize(lightD);
+  vec3 lightDU=-normalize(lightD.xzy);
   
   vec3 accumulatedAttenuation=vec3(1.0); //Holds the light attenuation from the previous bounces in order to get the total contribution of the sun and sky reflecting off of the current object to the current pixel on the camera.
   vec3 outputColour=vec3(0.0); //The output colour of this pixel. Is initally set to black.
